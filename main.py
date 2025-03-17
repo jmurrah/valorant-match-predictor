@@ -10,7 +10,7 @@ def main():
         else "cpu"
     )
     print(f"Using {device} device")
-    network = NeuralNetwork()
+    nn = NeuralNetwork()
     model = nn.to(device)
 
     X = torch.rand(1, 28, 28, device=device)
