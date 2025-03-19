@@ -13,6 +13,8 @@ def main():
     nn = NeuralNetwork()
     model = nn.to(device)
 
+
+    print("hello")
     X = torch.rand(1, 28, 28, device=device)
     logits = model(X)
     # pred_probab = nn.Softmax(dim=1)(logits)
