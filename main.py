@@ -15,6 +15,7 @@ def main():
 
     X = torch.rand(1, 28, 28, device=device)
     logits = model(X)
+    print("new hello")
     # pred_probab = nn.Softmax(dim=1)(logits)
     # y_pred = pred_probab.argmax(1)
     # print(f"Predicted class: {y_pred}")
