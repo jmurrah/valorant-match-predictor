@@ -32,3 +32,7 @@ rm -rf venv
 ```
 python3 main.py
 ```
+
+## Dataset
+https://www.kaggle.com/datasets/ryanluong1/valorant-champion-tour-2021-2023-data
+#### NOTE: rename the dataset folder from 'archive' to 'data'
