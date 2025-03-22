@@ -167,7 +167,6 @@ def transform_maps_scores(maps_scores_df: pd.DataFrame) -> pd.DataFrame:
             matchup_stats = get_matchup_stats(maps_scores_filtered, team_a, team_b)
             all_matchup_stats[f"{team_a}_vs_{team_b}"] = matchup_stats
 
-    # Combine all matchup stats into a single DataFrame
     return pd.concat(all_matchup_stats.values(), keys=all_matchup_stats.keys())
 
 
