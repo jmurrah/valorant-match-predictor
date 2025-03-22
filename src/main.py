@@ -40,7 +40,7 @@ def read_in_data(folder_name: str = "data") -> DATAFRAME_BY_YEAR_TYPE:
 
         for data_folder, csv_basename in csv_folders_and_basenames:
             full_path = os.path.join(
-                base_path, subfolder, data_folder, csv_filename + ".csv"
+                base_path, subfolder, data_folder, csv_basename + ".csv"
             )
             dataframes_by_year[year][data_folder][csv_basename] = pd.read_csv(
                 full_path, low_memory=False
