@@ -1,6 +1,9 @@
 # valorant-match-predictor
 I like valorant!
 
+## REQUIREMENT
+python 3.9+
+
 ## Creating Virtual Environment
 ```
 python3 -m venv venv
@@ -30,5 +33,8 @@ rm -rf venv
 
 ## Running Neural Network
 ```
-python3 main.py
+python3 src/main.py
 ```
+
+## Dataset
+https://www.kaggle.com/datasets/ryanluong1/valorant-champion-tour-2021-2023-data

@@ -1,8 +1,8 @@
-from torch import nn
+from torch import nn, Tensor
 
 
 class NeuralNetwork(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.flatten = nn.Flatten()
         self.linear_relu_stack = nn.Sequential(
@@ -13,7 +13,7 @@ class NeuralNetwork(nn.Module):
             nn.Linear(512, 10),
         )
 
-    def forward(self, x):
+    def forward(self, x: Tensor) -> Tensor:
         x = self.flatten(x)
         logits = self.linear_relu_stack(x)
         return logits
