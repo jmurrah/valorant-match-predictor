@@ -69,11 +69,8 @@ def main() -> None:
 
     yearly_models = []
     for year, year_data in transformed_data.items():
-        print(year_data)
-        matchups = year_data["matches"]["maps_scores"]["Match Name"]
-        # print(matchups)
+        print(year_data["matches"]["teams_matchups_stats"].head())
         nn = NeuralNetwork()
-        # train with all the matches this year
         yearly_models.append(nn)
 
     final_model = create_final_model(yearly_models)
