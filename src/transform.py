@@ -253,7 +253,7 @@ def read_in_data(folder_name: str = "data") -> DATAFRAME_BY_YEAR_TYPE:
     subfolders = [
         subfolder
         for subfolder in os.listdir(base_path)
-        if subfolder.startswith("vct_20") and subfolder != "vct_2021"
+        if subfolder.startswith("vct_20") and subfolder not in ["vct_2021", "vct_2025"]
     ]
     csv_folders_and_basenames = [
         [data_folder, csv_basename]
