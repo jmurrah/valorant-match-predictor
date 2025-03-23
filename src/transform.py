@@ -1,3 +1,5 @@
+import os
+
 import pandas as pd
 
 from collections import defaultdict
@@ -5,19 +7,19 @@ from collections import defaultdict
 
 DATAFRAME_BY_YEAR_TYPE = dict[str, dict[str, dict[str, pd.DataFrame]]]
 GLOBAL_TOURNAMENTS = ["Masters", "Valorant Champions"]
+REGIONAL_TOURNAMENTS = ["Americas", "EMEA", "Pacific", "China"]
 
 
-def filter_out_global_tournaments(dataframe: pd.DataFrame) -> pd.DataFrame:
+def filter_out_non_regional_tournaments(dataframe: pd.DataFrame) -> pd.DataFrame:
     return dataframe[
-        ~dataframe["Tournament"].str.contains(
-            "|".join(GLOBAL_TOURNAMENTS), case=False, na=False
+        dataframe["Tournament"].str.contains(
+            "|".join(REGIONAL_TOURNAMENTS), case=False, na=False
         )
     ]
 
 
 def transform_players_stats(players_stats_df: pd.DataFrame) -> pd.DataFrame:
     USEFUL_PLAYER_COLUMNS = [
-        "Tournament",
         "Teams",
         "Rating",
         "Average Combat Score",
@@ -27,7 +29,7 @@ def transform_players_stats(players_stats_df: pd.DataFrame) -> pd.DataFrame:
         "First Deaths Per Round",
     ]
     players_stats_filtered = (
-        filter_out_global_tournaments(players_stats_df)[USEFUL_PLAYER_COLUMNS]
+        filter_out_non_regional_tournaments(players_stats_df)[USEFUL_PLAYER_COLUMNS]
         .copy()
         .dropna()
     )
@@ -40,7 +42,7 @@ def transform_players_stats(players_stats_df: pd.DataFrame) -> pd.DataFrame:
 
     players_stats_transformed = (
         players_stats_filtered[USEFUL_PLAYER_COLUMNS]
-        .groupby(USEFUL_PLAYER_COLUMNS[:2])[USEFUL_PLAYER_COLUMNS[2:]]
+        .groupby(USEFUL_PLAYER_COLUMNS[:1])[USEFUL_PLAYER_COLUMNS[1:]]
         .mean()
         .reset_index()
     )
@@ -83,7 +85,10 @@ def calculate_team_stats(
     )
 
 
-def get_matchup_stats(maps_scores_filtered, team_a, team_b) -> pd.DataFrame:
+def get_matchup_stats(
+    maps_scores_filtered: pd.DataFrame, team_a: str, team_b: str
+) -> pd.DataFrame:
+    # Team A statistics
     team_a_as_a = maps_scores_filtered[maps_scores_filtered["Team A"] == team_a]
     team_a_as_b = maps_scores_filtered[maps_scores_filtered["Team B"] == team_a]
 
@@ -97,36 +102,65 @@ def get_matchup_stats(maps_scores_filtered, team_a, team_b) -> pd.DataFrame:
     others_vs_team_a = team_a_as_b[team_a_as_b["Team A"] != team_b]
     team_a_vs_others_stats = calculate_team_stats(team_a_vs_others, others_vs_team_a)
 
+    # Team B statistics
+    team_b_as_a = maps_scores_filtered[maps_scores_filtered["Team A"] == team_b]
+    team_b_as_b = maps_scores_filtered[maps_scores_filtered["Team B"] == team_b]
+
+    # Team B vs Team A statistics
+    team_b_vs_a_stats = calculate_team_stats(team_b_vs_a, team_a_vs_b)
+
+    # Team B vs ALL OTHER TEAMS (excluding Team A) statistics
+    team_b_vs_others = team_b_as_a[team_b_as_a["Team B"] != team_a]
+    others_vs_team_b = team_b_as_b[team_b_as_b["Team A"] != team_a]
+    team_b_vs_others_stats = calculate_team_stats(team_b_vs_others, others_vs_team_b)
+
     return pd.DataFrame(
         {
-            "Total Maps": {
-                "B": team_a_vs_b_stats["Total Maps"].values[0],
-                "Others": team_a_vs_others_stats["Total Maps"].values[0],
-            },
-            "Total Round Wins": {
-                "B": team_a_vs_b_stats["Total Round Wins"].values[0],
-                "Others": team_a_vs_others_stats["Total Round Wins"].values[0],
-            },
-            "Total Round Losses": {
-                "B": team_a_vs_b_stats["Total Round Losses"].values[0],
-                "Others": team_a_vs_others_stats["Total Round Losses"].values[0],
-            },
-            "Total Map Wins": {
-                "B": team_a_vs_b_stats["Total Map Wins"].values[0],
-                "Others": team_a_vs_others_stats["Total Map Wins"].values[0],
-            },
-            "Total Map Losses": {
-                "B": team_a_vs_b_stats["Total Map Losses"].values[0],
-                "Others": team_a_vs_others_stats["Total Map Losses"].values[0],
-            },
-            "Round Win Pct": {
-                "B": team_a_vs_b_stats["Round Win Pct"].values[0],
-                "Others": team_a_vs_others_stats["Round Win Pct"].values[0],
-            },
-            "Map Win Pct": {
-                "B": team_a_vs_b_stats["Map Win Pct"].values[0],
-                "Others": team_a_vs_others_stats["Map Win Pct"].values[0],
-            },
+            "Matchup": [f"{team_a}_vs_{team_b}"] * 4,
+            "Team": ["A", "A", "B", "B"],
+            "Opponent": ["B", "Others", "A", "Others"],
+            "Total Maps": [
+                team_a_vs_b_stats["Total Maps"].values[0],
+                team_a_vs_others_stats["Total Maps"].values[0],
+                team_b_vs_a_stats["Total Maps"].values[0],
+                team_b_vs_others_stats["Total Maps"].values[0],
+            ],
+            "Total Round Wins": [
+                team_a_vs_b_stats["Total Round Wins"].values[0],
+                team_a_vs_others_stats["Total Round Wins"].values[0],
+                team_b_vs_a_stats["Total Round Wins"].values[0],
+                team_b_vs_others_stats["Total Round Wins"].values[0],
+            ],
+            "Total Round Losses": [
+                team_a_vs_b_stats["Total Round Losses"].values[0],
+                team_a_vs_others_stats["Total Round Losses"].values[0],
+                team_b_vs_a_stats["Total Round Losses"].values[0],
+                team_b_vs_others_stats["Total Round Losses"].values[0],
+            ],
+            "Total Map Wins": [
+                team_a_vs_b_stats["Total Map Wins"].values[0],
+                team_a_vs_others_stats["Total Map Wins"].values[0],
+                team_b_vs_a_stats["Total Map Wins"].values[0],
+                team_b_vs_others_stats["Total Map Wins"].values[0],
+            ],
+            "Total Map Losses": [
+                team_a_vs_b_stats["Total Map Losses"].values[0],
+                team_a_vs_others_stats["Total Map Losses"].values[0],
+                team_b_vs_a_stats["Total Map Losses"].values[0],
+                team_b_vs_others_stats["Total Map Losses"].values[0],
+            ],
+            "Round Win Pct": [
+                team_a_vs_b_stats["Round Win Pct"].values[0],
+                team_a_vs_others_stats["Round Win Pct"].values[0],
+                team_b_vs_a_stats["Round Win Pct"].values[0],
+                team_b_vs_others_stats["Round Win Pct"].values[0],
+            ],
+            "Map Win Pct": [
+                team_a_vs_b_stats["Map Win Pct"].values[0],
+                team_a_vs_others_stats["Map Win Pct"].values[0],
+                team_b_vs_a_stats["Map Win Pct"].values[0],
+                team_b_vs_others_stats["Map Win Pct"].values[0],
+            ],
         }
     )
 
@@ -143,9 +177,11 @@ def transform_maps_scores(maps_scores_df: pd.DataFrame) -> pd.DataFrame:
         "Team B Score",
         "Team B Overtime Score",
     ]
-    maps_scores_filtered = filter_out_global_tournaments(maps_scores_df)[
-        USEFUL_MAPS_SCORES_COLUMNS
-    ].copy()
+    maps_scores_filtered = (
+        filter_out_non_regional_tournaments(maps_scores_df)[USEFUL_MAPS_SCORES_COLUMNS]
+        .copy()
+        .dropna()
+    )
     maps_scores_filtered["Team A Map Score"] = maps_scores_filtered[
         "Team A Score"
     ] + maps_scores_filtered["Team A Overtime Score"].fillna(0)
@@ -158,7 +194,7 @@ def transform_maps_scores(maps_scores_df: pd.DataFrame) -> pd.DataFrame:
     ).unique()
 
     all_matchup_stats = {}
-    for team_a in all_teams:
+    for team_a in all_teams[:10]:
         team_a_as_a = maps_scores_filtered[maps_scores_filtered["Team A"] == team_a]
         team_a_as_b = maps_scores_filtered[maps_scores_filtered["Team B"] == team_a]
 
@@ -167,7 +203,15 @@ def transform_maps_scores(maps_scores_df: pd.DataFrame) -> pd.DataFrame:
             matchup_stats = get_matchup_stats(maps_scores_filtered, team_a, team_b)
             all_matchup_stats[f"{team_a}_vs_{team_b}"] = matchup_stats
 
-    return pd.concat(all_matchup_stats.values(), keys=all_matchup_stats.keys())
+    combined_df = pd.concat(all_matchup_stats.values()).reset_index()
+    repeat_count = len(combined_df) // len(all_matchup_stats)
+
+    matchup_identifiers = []
+    for key in all_matchup_stats.keys():
+        matchup_identifiers.extend([key] * repeat_count)
+
+    combined_df["Matchup"] = matchup_identifiers
+    return combined_df
 
 
 def transform_data(
@@ -190,3 +234,44 @@ def transform_data(
         )
 
     return transformed_dataframes_by_year
+
+
+def read_in_data(folder_name: str = "data") -> DATAFRAME_BY_YEAR_TYPE:
+    # Dataset -> SEE README.md
+    USEFUL_CSVS = {
+        "players_stats": ["players_stats"],
+        "matches": [
+            "scores",
+            "overview",
+            "maps_scores",
+            "win_loss_methods_round_number",
+            "eco_stats",
+            "maps_played",
+        ],
+    }
+    base_path = os.path.join(os.path.abspath(os.getcwd()), folder_name)
+    subfolders = [
+        subfolder
+        for subfolder in os.listdir(base_path)
+        if subfolder.startswith("vct_20") and subfolder != "vct_2021"
+    ]
+    csv_folders_and_basenames = [
+        [data_folder, csv_basename]
+        for data_folder, csv_basenames in USEFUL_CSVS.items()
+        for csv_basename in csv_basenames
+    ]
+    dataframes_by_year = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
+
+    for subfolder in subfolders:
+        year = subfolder.split("_")[-1]  # NOTE: subfolder = vct_20XX
+        print(f"Reading in {year} data!")
+
+        for data_folder, csv_basename in csv_folders_and_basenames:
+            full_path = os.path.join(
+                base_path, subfolder, data_folder, csv_basename + ".csv"
+            )
+            dataframes_by_year[year][data_folder][csv_basename] = pd.read_csv(
+                full_path, low_memory=False
+            )
+
+    return dataframes_by_year
