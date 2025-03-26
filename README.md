@@ -1,39 +1,52 @@
 # valorant-match-predictor
 I like valorant!
 
-## REQUIREMENT
-python 3.9+
+## How to Run
+1) Install pipx: [https://pipx.pypa.io/stable/](https://pipx.pypa.io/stable/)
+    - **For Linux/WSL:**
+    ```
+    sudo apt update
+    
+    sudo apt install pipx
 
-## Creating Virtual Environment
-```
-python3 -m venv venv
-source venv/bin/activate
-```
+    pipx --version
+    ```
+    - **For macOS:**
+    ```
+    brew install pipx
 
-## Downloading Dependencies
-```
-pip3 install -r requirements.txt
-```
+    pipx ensurepath
+
+    pipx --version
+    ```
+
+2) Download poetry: https://python-poetry.org/docs/#installing-with-pipx
+    ```
+    pipx install poetry==1.8.2
+
+    poetry --version
+    ```
+
+3) Launch poetry shell and install dependencies
+    ```
+    poetry shell
+
+    poetry install
+    ```
+
+4) Run program
+    ```
+    poetry run python3 -m valorant_match_predictor.main
+    ```
 
 ## Updating Dependencies
 ```
-pip3 freeze > requirements.txt
+poetry add libraryname
 ```
 
 ## Formatting
 ```
 black .
-```
-
-## Deleting Virtual Environment
-```
-deactivate
-rm -rf venv
-```
-
-## Running Neural Network
-```
-python3 src/main.py
 ```
 
 ## Dataset

@@ -3,8 +3,8 @@ import pandas as pd
 
 from typing import Callable
 
-from neural_network import NeuralNetwork
-from transform import read_in_data, transform_data
+from valorant_match_predictor import NeuralNetwork
+from valorant_match_predictor import read_in_data, transform_data
 
 
 def set_pandas_options() -> None:
