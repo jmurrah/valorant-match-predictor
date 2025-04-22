@@ -236,8 +236,9 @@ def transform_data(
     return transformed_dataframes_by_year
 
 
-def read_in_data(folder_name: str = "data") -> DATAFRAME_BY_YEAR_TYPE:
+def read_in_data(folder_name: str, years: list[str]) -> DATAFRAME_BY_YEAR_TYPE:
     # Dataset -> SEE README.md
+    transformed_years = [f"vct_{year}" for year in years]
     USEFUL_CSVS = {
         "players_stats": ["players_stats"],
         "matches": [
