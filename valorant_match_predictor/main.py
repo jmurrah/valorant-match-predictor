@@ -102,7 +102,7 @@ def create_input_tensors(
     return team_a_tensor, team_b_tensor, win_probabilities_tensor, feature_names
 
 
-def create_pr_input_tensors(
+def create_pr_input_tensor(
     players_stats: pd.DataFrame, matchups_data: pd.DataFrame
 ) -> tuple[torch.Tensor, torch.Tensor, list[str]]:
     feature_names = [
@@ -141,8 +141,9 @@ def create_pr_input_tensors(
 
     team_a_pr_tensor = torch.tensor(team_a_pr_features, dtype=torch.float32)
     team_b_pr_tensor = torch.tensor(team_b_pr_features, dtype=torch.float32)
+    team_pr_tensor = torch.cat([team_a_pr_tensor, team_b_pr_tensor], dim=0)
 
-    return team_a_pr_tensor, team_b_pr_tensor, feature_names
+    return team_pr_tensor, feature_names
 
 
 def create_final_pr_model(
@@ -171,85 +172,54 @@ def train(years) -> None:
         players_stats = year_data["players_stats"]["team_players_stats"]
         matchups_data = year_data["matches"]["teams_matchups_stats"]
 
-        team_a_pr_tensor, team_b_pr_tensor, feature_names = create_pr_input_tensors(
+        team_pr_tensor, feature_names = create_pr_input_tensor(
             players_stats, matchups_data
         )
-        mask = ~(
-            torch.isnan(team_a_pr_tensor).any(dim=1)
-            | torch.isnan(team_b_pr_tensor).any(dim=1)
-        )
 
-        team_a_pr_tensor = team_a_pr_tensor[mask]
-        team_b_pr_tensor = team_b_pr_tensor[mask]
-
-        assert not torch.isnan(team_a_pr_tensor).any(), "Input contains NaN!"
-        assert not torch.isnan(team_b_pr_tensor).any(), "Input contains NaN!"
-
-        print(team_a_pr_tensor)
+        mask = ~(torch.isnan(team_pr_tensor).any(dim=1))
+        team_pr_tensor = team_pr_tensor[mask]
 
         year_data_cache[year] = {
-            "team_a_pr_tensor": team_a_pr_tensor,
-            "team_b_pr_tensor": team_b_pr_tensor,
+            "team_pr_tensor": team_pr_tensor,
             "feature_names": feature_names,
         }
-        all_team_features.append(team_a_pr_tensor.numpy())
-        all_team_features.append(team_b_pr_tensor.numpy())
+        all_team_features.append(team_pr_tensor.numpy())
 
     combined_features = np.vstack(all_team_features)
     scaler.fit(combined_features)
     for year in transformed_data.keys():
         print(f"Training for year: {year}")
-        team_a_pr_tensor = year_data_cache[year]["team_a_pr_tensor"]
-        team_b_pr_tensor = year_data_cache[year]["team_b_pr_tensor"]
+        team_pr_tensor = year_data_cache[year]["team_pr_tensor"]
         feature_names = year_data_cache[year]["feature_names"]
 
-        team_a_pr_features_scaled = scaler.transform(team_a_pr_tensor.numpy())
-        team_b_pr_features_scaled = scaler.transform(team_b_pr_tensor.numpy())
+        team_pr_features_scaled = scaler.transform(team_pr_tensor.numpy())
+        team_pr_tensors = torch.tensor(team_pr_features_scaled, dtype=torch.float32)
 
-        team_a_pr_tensors = torch.tensor(team_a_pr_features_scaled, dtype=torch.float32)
-        team_b_pr_tensors = torch.tensor(team_b_pr_features_scaled, dtype=torch.float32)
+        team_pr_nn = PowerRatingNeuralNetwork(input_size=len(feature_names))
+        team_pr_nn.train_model(team_pr_tensors)
 
-        team_a_pr_nn = PowerRatingNeuralNetwork(input_size=len(feature_names))
-        team_b_pr_nn = PowerRatingNeuralNetwork(input_size=len(feature_names))
-        team_a_pr_nn.train_model(team_a_pr_tensors)
-        team_b_pr_nn.train_model(team_b_pr_tensors)
-
-        yearly_team_pr_models.extend([team_a_pr_nn, team_b_pr_nn])
+        yearly_team_pr_models.append(team_pr_nn)
 
     final_team_pr_model = create_final_pr_model(yearly_team_pr_models)
 
     # Sample output using the last year's data
     last_year = max(years)
-    sample_tensor_a = torch.tensor(
+    sample_tensor = torch.tensor(
         [
-            scaler.transform(
-                year_data_cache[last_year]["team_a_pr_tensor"][0:1].numpy()
-            )[0]
-        ],
-        dtype=torch.float32,
-    )
-    sample_tensor_b = torch.tensor(
-        [
-            scaler.transform(
-                year_data_cache[last_year]["team_b_pr_tensor"][0:1].numpy()
-            )[0]
+            scaler.transform(year_data_cache[last_year]["team_pr_tensor"][0:1].numpy())[
+                0
+            ]
         ],
         dtype=torch.float32,
     )
 
     # Display the input features
     print("\nSample input features for Team A (scaled):")
-    display_features(feature_names, sample_tensor_a[0])
-
-    print("\nSample input features for Team B (scaled):")
-    display_features(feature_names, sample_tensor_b[0])
+    display_features(feature_names, sample_tensor[0])
 
     # Get and display the power ratings
-    pr_a = final_team_pr_model(sample_tensor_a)
-    pr_b = final_team_pr_model(sample_tensor_b)
-
-    print(f"\nPower Rating for sample Team A: {pr_a:.4f}")
-    print(f"Power Rating for sample Team B: {pr_b:.4f}")
+    pr = final_team_pr_model(sample_tensor)
+    print(f"\nPower Rating for sample Team A: {pr:.4f}")
 
 
 def test(years):
