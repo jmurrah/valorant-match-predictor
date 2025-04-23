@@ -14,4 +14,4 @@ def print_transformed_data_structure(transformed_data):
                     for col in df.columns:
                         print(f"  - {col}")
                     print("\nSample data:")
-                    print(df.head(2))
+                    print(df.head(40))
