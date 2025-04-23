@@ -1,3 +1,3 @@
-from .neural_networks import PowerRatingNeuralNetwork
-from .transform import read_in_data, transform_data
+from .neural_networks import PowerRatingNeuralNetwork, MatchPredictorNeuralNetwork
+from .transform import read_in_data, transform_data, DATAFRAME_BY_YEAR_TYPE
 from .dev_utils import print_transformed_data_structure

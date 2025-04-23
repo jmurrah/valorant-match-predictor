@@ -6,9 +6,14 @@ from sklearn.preprocessing import StandardScaler
 from typing import Callable
 from collections import defaultdict, Counter
 
-from valorant_match_predictor import PowerRatingNeuralNetwork
-from valorant_match_predictor import read_in_data, transform_data
-from valorant_match_predictor import print_transformed_data_structure
+from valorant_match_predictor import (
+    DATAFRAME_BY_YEAR_TYPE,
+    PowerRatingNeuralNetwork,
+    MatchPredictorNeuralNetwork,
+    read_in_data,
+    transform_data,
+    print_transformed_data_structure,
+)
 
 
 def set_pandas_options() -> None:
@@ -27,6 +32,15 @@ def display_features(
 
 
 def create_team_feature(
+    head_to_head_stats: pd.DataFrame,
+) -> list[float]:
+    return [
+        head_to_head_stats["Round Win Pct"].values[0],
+        head_to_head_stats["Map Win Pct"].values[0],
+    ]
+
+
+def create_team_pr_feature(
     team_players_stats: pd.DataFrame,
     team_vs_others_stats: pd.DataFrame,
 ) -> list[float]:
@@ -42,20 +56,13 @@ def create_team_feature(
     ]
 
 
-def create_input_tensors(
-    players_stats: pd.DataFrame, matchups_data: pd.DataFrame
+def create_match_input_tensors(
+    pr_nn: PowerRatingNeuralNetwork,
+    matchups_data: pd.DataFrame,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     feature_names = [
-        "Rating",
-        "Average Combat Score",
-        "Kills:Deaths",
-        "Kill, Assist, Trade, Survive %",
-        "First Kills Per Round",
-        "First Deaths Per Round",
         "Head-to-Head Round Win %",
         "Head-to-Head Map Win %",
-        "Team-vs-Others Round Win %",
-        "Team-vs-Others Map Win %",
     ]
     team_a_features = []
     team_b_features = []
@@ -64,34 +71,27 @@ def create_input_tensors(
     for matchup in matchups_data["Matchup"].unique():
         matchup_data = matchups_data[matchups_data["Matchup"] == matchup]
         team_a, team_b = matchup.split("_vs_")
-        team_a_players_stats = players_stats[players_stats["Teams"] == team_a]
-        team_b_players_stats = players_stats[players_stats["Teams"] == team_b]
 
         team_a_vs_b_stats = matchup_data[
             (matchup_data["Team"] == "A") & (matchup_data["Opponent"] == "B")
         ]
-        team_a_vs_others_stats = matchup_data[
-            (matchup_data["Team"] == "A") & (matchup_data["Opponent"] == "Others")
-        ]
         team_b_vs_a_stats = matchup_data[
             (matchup_data["Team"] == "B") & (matchup_data["Opponent"] == "A")
         ]
-        team_b_vs_others_stats = matchup_data[
-            (matchup_data["Team"] == "B") & (matchup_data["Opponent"] == "Others")
-        ]
 
-        team_a_feature = create_team_feature(
-            team_a_players_stats, team_a_vs_b_stats, team_a_vs_others_stats
-        )
-        team_b_feature = create_team_feature(
-            team_b_players_stats, team_b_vs_a_stats, team_b_vs_others_stats
-        )
+        # pr_nn is your trained PowerRatingNeuralNetwork
+        with torch.no_grad():
+            pr_vector = pr_nn.encode(team_tensor)  # shape (1, latent_dim)
+        # or, if latent_dim=1:
+        pr_score = pr_vector.item()  # a float
+
+        team_a_feature = create_team_feature(team_a_vs_b_stats)
+        team_b_feature = create_team_feature(team_b_vs_a_stats)
 
         team_a_features.append(team_a_feature)
         team_b_features.append(team_b_feature)
-        win_probabilities.append(
-            team_a_vs_b_stats["Round Win Pct"].values[0]
-        )  # could also try 'Map Win Pct'
+
+        win_probabilities.append(team_a_vs_b_stats["Map Win Pct"].values[0])
 
     team_a_tensor = torch.tensor(team_a_features, dtype=torch.float32)
     team_b_tensor = torch.tensor(team_b_features, dtype=torch.float32)
@@ -146,24 +146,21 @@ def create_pr_input_tensor(
     return team_pr_tensor, feature_names
 
 
-def create_final_pr_model(
+def create_final_pr_feature_vector(
     models: list[PowerRatingNeuralNetwork],
-) -> Callable[[torch.Tensor], float]:
-    def final_power_rating(team_features: torch.Tensor) -> float:
+) -> Callable[[torch.Tensor], torch.Tensor]:
+    def final_pr_vector(team_features: torch.Tensor) -> torch.Tensor:
         for m in models:
             m.eval()
         with torch.no_grad():
-            preds = torch.stack([m.encode(team_features) for m in models])
-            return torch.mean(preds, dim=0).item()
+            preds = torch.stack([m.encode(team_features) for m in models], dim=0)
+            return preds
 
-    return final_power_rating
+    return final_pr_vector
 
 
-def train(years) -> None:
+def get_power_rating_model_feature_vector(transformed_data: DATAFRAME_BY_YEAR_TYPE):
     scaler = StandardScaler()
-    dataframes_by_year = read_in_data("data", years)
-    transformed_data = transform_data(dataframes_by_year)
-
     yearly_team_pr_models = []
     all_team_features = []
     year_data_cache = {}
@@ -200,26 +197,35 @@ def train(years) -> None:
 
         yearly_team_pr_models.append(team_pr_nn)
 
-    final_team_pr_model = create_final_pr_model(yearly_team_pr_models)
+    final_team_pr_feature_vector = create_final_pr_feature_vector(yearly_team_pr_models)
+    return final_team_pr_feature_vector
 
-    # Sample output using the last year's data
-    last_year = max(years)
-    sample_tensor = torch.tensor(
-        [
-            scaler.transform(year_data_cache[last_year]["team_pr_tensor"][0:1].numpy())[
-                0
-            ]
-        ],
-        dtype=torch.float32,
-    )
 
-    # Display the input features
-    print("\nSample input features for Team A (scaled):")
-    display_features(feature_names, sample_tensor[0])
+def train_match_predictor_model(pr_feature_vector, transformed_data):
+    yearly_team_pr_models = []
+    all_team_features = []
+    year_data_cache = {}
 
-    # Get and display the power ratings
-    pr = final_team_pr_model(sample_tensor)
-    print(f"\nPower Rating for sample Team A: {pr:.4f}")
+    for year, year_data in transformed_data.items():
+        players_stats = year_data["players_stats"]["team_players_stats"]
+        matchups_data = year_data["matches"]["teams_matchups_stats"]
+
+        team_a_tensor, team_b_tensor, win_probabilities_tensor, feature_names = (
+            create_match_input_tensors(matchups_data)
+        )
+
+        team_a_features = 1
+        team_b_features = 1
+        match_predictor_nn = MatchPredictorNeuralNetwork(
+            len(team_a_features) + len(team_b_features)
+        )
+        match_predictor_nn.train_model(team_a_tensor, team_b_tensor)
+
+
+def train(years):
+    dataframes_by_year = read_in_data("data", years)
+    transformed_data = transform_data(dataframes_by_year)
+    pr_feature_vector = get_power_rating_model_feature_vector(transformed_data)
 
 
 def test(years):

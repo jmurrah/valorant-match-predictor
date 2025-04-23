@@ -5,65 +5,60 @@ import torch.optim as optim
 from torch.utils.data import TensorDataset, DataLoader
 
 
-class abc(nn.Module):
-    def __init__(self, input_size=10) -> None:
+class MatchPredictorNeuralNetwork(nn.Module):
+    def __init__(
+        self,
+        input_size,
+        hidden_sizes: list[int] = [64, 32],
+        dropout: float = 0.2,
+    ):
         super().__init__()
-        self.team_layer1 = nn.Linear(input_size, 64)
-        self.team_layer2 = nn.Linear(64, 32)
-
-        self.combined_layer1 = nn.Linear(64, 32)
-        self.combined_layer2 = nn.Linear(32, 16)
-        self.output_layer = nn.Linear(16, 1)
-
-        self.dropout = nn.Dropout(0.2)
+        self.layer1 = nn.Linear(input_size, hidden_sizes[0])
+        self.layer2 = nn.Linear(hidden_sizes[0], hidden_sizes[1])
+        self.output = nn.Linear(hidden_sizes[1], 1)
+        self.dropout = nn.Dropout(dropout)
         self.criterion = nn.BCELoss()
 
-    def process_team(self, x: torch.Tensor) -> torch.Tensor:
-        x = F.relu(self.team_layer1(x))
+    def forward(
+        self, pr_features: torch.Tensor, other_feats: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        pr_features: (batch_size, pr_feat_dim)
+        other_feats:{batch_size, other_feat_dim}
+        """
+        x = torch.cat([pr_features, other_feats], dim=1)
+        x = F.relu(self.layer1(x))
         x = self.dropout(x)
-        x = F.relu(self.team_layer2(x))
-        return x
-
-    def forward(self, team_a: torch.Tensor, team_b: torch.Tensor) -> torch.Tensor:
-        team_a_features = self.process_team(team_a)
-        team_b_features = self.process_team(team_b)
-        combined_features = torch.cat((team_a_features, team_b_features), dim=1)
-
-        x = F.relu(self.combined_layer1(combined_features))
-        x = self.dropout(x)
-        x = F.relu(self.combined_layer2(x))
-
-        win_prob = torch.sigmoid(self.output_layer(x))
-        return win_prob
+        x = F.relu(self.layer2(x))
+        return torch.sigmoid(self.output(x))
 
     def train_model(
         self,
-        team_a_tensor: torch.Tensor,
-        team_b_tensor: torch.Tensor,
-        win_probabilities: torch.Tensor,
-        epochs: int = 1000,
-        learning_rate: float = 0.001,
+        team_a_features: torch.Tensor,
+        team_b_features: torch.Tensor,
+        win_labels: torch.Tensor,
+        epochs: int = 100,
+        learning_rate: float = 1e-3,
         batch_size: int = 16,
-    ) -> None:
-        self.optimizer = optim.Adam(self.parameters(), lr=learning_rate)
-        dataset = TensorDataset(team_a_tensor, team_b_tensor, win_probabilities)
-        dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+    ):
+        optimizer = torch.optim.Adam(self.parameters(), lr=learning_rate)
+        ds = TensorDataset(team_a_features, team_b_features, win_labels)
+        dl = DataLoader(ds, batch_size=batch_size, shuffle=True)
 
         self.train()
-        for i in range(epochs):
-            total_loss = 0
-            for team_a_batch, team_b_batch, target_batch in dataloader:
-                self.optimizer.zero_grad()
-
-                outputs = self(team_a_batch, team_b_batch)
-                loss = self.criterion(outputs, target_batch)
+        for epoch in range(1, epochs + 1):
+            total_loss = 0.0
+            for prb, ofb, yb in dl:
+                optimizer.zero_grad()
+                preds = self(prb, ofb)
+                loss = self.criterion(preds, yb)
                 loss.backward()
-
-                self.optimizer.step()
+                optimizer.step()
                 total_loss += loss.item()
-
-            if (i + 1) % 100 == 0:
-                print(f"Epoch {i+1}/{epochs}, Loss: {total_loss/len(dataloader):.4f}")
+            if epoch % 10 == 0:
+                avg = total_loss / len(dl)
+                print(f"Epoch {epoch}/{epochs}, Loss: {avg:.4f}")
+        self.eval()
 
     def predict(
         self, team_a_features: torch.Tensor, team_b_features: torch.Tensor
@@ -166,8 +161,3 @@ class PowerRatingNeuralNetwork(nn.Module):
         with torch.no_grad():
             z = self.encode(feature_tensor)
         return z.item()
-
-
-class TeamPredictorNeuralNetwork(nn.Module):
-    def __init__(self):
-        pass
