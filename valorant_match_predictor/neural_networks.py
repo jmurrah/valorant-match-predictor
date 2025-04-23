@@ -82,37 +82,34 @@ class PowerRatingNeuralNetwork(nn.Module):
         hidden_dims: list[int] = [64, 32],
         dropout: float = 0.1,
     ) -> None:
-        """
-        Autoencoder for unsupervised power rating extraction.
-        Args:
-            input_size: Number of numeric features per team.
-            latent_dim: Dimensionality of the bottleneck (power rating).
-            hidden_dims: Sizes of hidden layers in encoder/decoder.
-            dropout: Dropout probability between layers.
-        """
         super().__init__()
-        # encoded layers
+        # build encoder
         encoder_layers = []
         prev_dim = input_size
         for h in hidden_dims:
             encoder_layers += [nn.Linear(prev_dim, h), nn.ReLU(), nn.Dropout(dropout)]
             prev_dim = h
-
-        encoder_layers.append(nn.Linear(prev_dim, latent_dim))  # Bottleneck
+        encoder_layers.append(nn.Linear(prev_dim, latent_dim))
         self.encoder = nn.Sequential(*encoder_layers)
 
-        # decoded layers
+        # build decoder
         decoder_layers = []
         prev_dim = latent_dim
         for h in reversed(hidden_dims):
             decoder_layers += [nn.Linear(prev_dim, h), nn.ReLU(), nn.Dropout(dropout)]
             prev_dim = h
-
-        decoder_layers.append(nn.Linear(prev_dim, input_size))  # Reconstruct input
+        decoder_layers.append(nn.Linear(prev_dim, input_size))
         self.decoder = nn.Sequential(*decoder_layers)
 
         # reconstruction loss
         self.criterion = nn.MSELoss()
+
+        # 2) Xavier‐initialize all weights
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         z = self.encoder(x)
@@ -126,18 +123,14 @@ class PowerRatingNeuralNetwork(nn.Module):
         self,
         feature_tensor: torch.Tensor,
         epochs: int = 200,
-        learning_rate: float = 1e-3,
+        learning_rate: float = 1e-4,  # 1) lowered lr
         batch_size: int = 16,
         print_every: int = 20,
     ) -> None:
-        """
-        Train the autoencoder on team feature vectors to learn power ratings.
-        Args:
-            feature_tensor: Tensor of shape (N, input_size).
-        """
         optimizer = optim.Adam(self.parameters(), lr=learning_rate)
-        dataset = TensorDataset(feature_tensor)
-        dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+        dataloader = DataLoader(
+            TensorDataset(feature_tensor), batch_size=batch_size, shuffle=True
+        )
 
         self.train()
         for epoch in range(1, epochs + 1):
@@ -147,12 +140,14 @@ class PowerRatingNeuralNetwork(nn.Module):
                 X_recon = self(X_batch)
                 loss = self.criterion(X_recon, X_batch)
                 loss.backward()
+                # 3) clip gradients
+                torch.nn.utils.clip_grad_norm_(self.parameters(), max_norm=1.0)
                 optimizer.step()
                 total_loss += loss.item()
 
             if epoch % print_every == 0:
-                avg_loss = total_loss / len(dataloader)
-                print(f"Epoch {epoch}/{epochs} — Recon Loss: {avg_loss:.4f}")
+                avg = total_loss / len(dataloader)
+                print(f"Epoch {epoch}/{epochs} — Recon Loss: {avg:.4f}")
 
     def predict(self, feature_tensor: torch.Tensor) -> float:
         """
