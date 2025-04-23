@@ -104,7 +104,7 @@ class PowerRatingNeuralNetwork(nn.Module):
         # reconstruction loss
         self.criterion = nn.MSELoss()
 
-        # 2) Xavier‐initialize all weights
+        # Xavier‐initialize all weights
         for m in self.modules():
             if isinstance(m, nn.Linear):
                 nn.init.xavier_uniform_(m.weight)
@@ -123,10 +123,14 @@ class PowerRatingNeuralNetwork(nn.Module):
         self,
         feature_tensor: torch.Tensor,
         epochs: int = 200,
-        learning_rate: float = 1e-4,  # 1) lowered lr
+        learning_rate: float = 1e-4,
         batch_size: int = 16,
         print_every: int = 20,
     ) -> None:
+        # print(feature_tensor)
+        assert not torch.isnan(feature_tensor).any(), "Input contains NaN!"
+        assert not torch.isinf(feature_tensor).any(), "Input contains Inf!"
+
         optimizer = optim.Adam(self.parameters(), lr=learning_rate)
         dataloader = DataLoader(
             TensorDataset(feature_tensor), batch_size=batch_size, shuffle=True
@@ -140,7 +144,8 @@ class PowerRatingNeuralNetwork(nn.Module):
                 X_recon = self(X_batch)
                 loss = self.criterion(X_recon, X_batch)
                 loss.backward()
-                # 3) clip gradients
+
+                # clip gradients
                 torch.nn.utils.clip_grad_norm_(self.parameters(), max_norm=1.0)
                 optimizer.step()
                 total_loss += loss.item()

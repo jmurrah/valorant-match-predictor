@@ -174,6 +174,19 @@ def train(years) -> None:
         team_a_pr_tensor, team_b_pr_tensor, feature_names = create_pr_input_tensors(
             players_stats, matchups_data
         )
+        mask = ~(
+            torch.isnan(team_a_pr_tensor).any(dim=1)
+            | torch.isnan(team_b_pr_tensor).any(dim=1)
+        )
+
+        team_a_pr_tensor = team_a_pr_tensor[mask]
+        team_b_pr_tensor = team_b_pr_tensor[mask]
+
+        assert not torch.isnan(team_a_pr_tensor).any(), "Input contains NaN!"
+        assert not torch.isnan(team_b_pr_tensor).any(), "Input contains NaN!"
+
+        print(team_a_pr_tensor)
+
         year_data_cache[year] = {
             "team_a_pr_tensor": team_a_pr_tensor,
             "team_b_pr_tensor": team_b_pr_tensor,
@@ -244,6 +257,12 @@ def test(years):
 
 
 if __name__ == "__main__":
+    torch.set_printoptions(
+        threshold=int(1e8),  # max number of elements before truncating
+        edgeitems=3,  # how many items to show at beginning/end of each dimension
+        linewidth=200,  # wrap line length
+        precision=4,  # decimal precision
+    )
     set_pandas_options()
     train(years=["2023"])
     test(years=["2025"])
