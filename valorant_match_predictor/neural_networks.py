@@ -73,7 +73,7 @@ class PowerRatingNeuralNetwork(nn.Module):
     def __init__(
         self,
         input_size: int,
-        latent_dim: int = 1,
+        latent_dim: int = 8,
         hidden_dims: list[int] = [64, 32],
         dropout: float = 0.1,
     ) -> None:

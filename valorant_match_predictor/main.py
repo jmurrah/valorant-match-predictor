@@ -57,7 +57,8 @@ def create_team_pr_feature(
 
 
 def create_match_input_tensors(
-    pr_nn: PowerRatingNeuralNetwork,
+    pr_vector: Callable[[torch.Tensor], torch.Tensor],
+    players_stats: pd.DataFrame,
     matchups_data: pd.DataFrame,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     feature_names = [
@@ -72,29 +73,56 @@ def create_match_input_tensors(
         matchup_data = matchups_data[matchups_data["Matchup"] == matchup]
         team_a, team_b = matchup.split("_vs_")
 
+        team_a_players_stats = players_stats[players_stats["Teams"] == team_a]
+        team_b_players_stats = players_stats[players_stats["Teams"] == team_b]
         team_a_vs_b_stats = matchup_data[
             (matchup_data["Team"] == "A") & (matchup_data["Opponent"] == "B")
         ]
         team_b_vs_a_stats = matchup_data[
             (matchup_data["Team"] == "B") & (matchup_data["Opponent"] == "A")
         ]
+        team_a_vs_others_stats = matchup_data[
+            (matchup_data["Team"] == "A") & (matchup_data["Opponent"] == "Others")
+        ]
+        team_b_vs_others_stats = matchup_data[
+            (matchup_data["Team"] == "B") & (matchup_data["Opponent"] == "Others")
+        ]
 
-        # pr_nn is your trained PowerRatingNeuralNetwork
+        team_a_pr_feature = create_team_pr_feature(
+            team_a_players_stats, team_a_vs_others_stats
+        )
+        team_b_pr_feature = create_team_pr_feature(
+            team_b_players_stats, team_b_vs_others_stats
+        )
+
         with torch.no_grad():
-            pr_vector = pr_nn.encode(team_tensor)  # shape (1, latent_dim)
-        # or, if latent_dim=1:
-        pr_score = pr_vector.item()  # a float
+            team_a_pr_encoded = pr_vector(
+                torch.tensor(np.array(team_a_pr_feature), dtype=torch.float32)
+            )
+            team_b_pr_encoded = pr_vector(
+                torch.tensor(np.array(team_b_pr_feature), dtype=torch.float32)
+            )
 
-        team_a_feature = create_team_feature(team_a_vs_b_stats)
-        team_b_feature = create_team_feature(team_b_vs_a_stats)
+        team_a_pr_vector = team_a_pr_encoded.squeeze(1).flatten().numpy()
+        team_b_pr_vector = team_b_pr_encoded.squeeze(1).flatten().numpy()
 
-        team_a_features.append(team_a_feature)
-        team_b_features.append(team_b_feature)
+        team_a_feature = np.array(create_team_feature(team_a_vs_b_stats))
+        team_b_feature = np.array(create_team_feature(team_b_vs_a_stats))
+        team_a_features.append(
+            np.concatenate([team_a_pr_vector, team_a_feature], axis=0)
+        )
+        team_b_features.append(
+            np.concatenate([team_b_pr_vector, team_b_feature], axis=0)
+        )
 
         win_probabilities.append(team_a_vs_b_stats["Map Win Pct"].values[0])
 
-    team_a_tensor = torch.tensor(team_a_features, dtype=torch.float32)
-    team_b_tensor = torch.tensor(team_b_features, dtype=torch.float32)
+    team_a_tensor = torch.from_numpy(
+        np.stack(team_a_features, axis=0).astype(np.float32)
+    )
+    team_b_tensor = torch.from_numpy(
+        np.stack(team_b_features, axis=0).astype(np.float32)
+    )
     win_probabilities_tensor = torch.tensor(
         win_probabilities, dtype=torch.float32
     ).unsqueeze(1)
@@ -133,10 +161,10 @@ def create_pr_input_tensor(
         ]
 
         team_a_pr_features.append(
-            create_team_feature(team_a_players_stats, team_a_vs_others_stats)
+            create_team_pr_feature(team_a_players_stats, team_a_vs_others_stats)
         )
         team_b_pr_features.append(
-            create_team_feature(team_b_players_stats, team_b_vs_others_stats)
+            create_team_pr_feature(team_b_players_stats, team_b_vs_others_stats)
         )
 
     team_a_pr_tensor = torch.tensor(team_a_pr_features, dtype=torch.float32)
@@ -159,7 +187,9 @@ def create_final_pr_feature_vector(
     return final_pr_vector
 
 
-def get_power_rating_model_feature_vector(transformed_data: DATAFRAME_BY_YEAR_TYPE):
+def get_power_rating_model_feature_vector(
+    transformed_data: DATAFRAME_BY_YEAR_TYPE,
+) -> Callable[[torch.Tensor], torch.Tensor]:
     scaler = StandardScaler()
     yearly_team_pr_models = []
     all_team_features = []
@@ -201,31 +231,67 @@ def get_power_rating_model_feature_vector(transformed_data: DATAFRAME_BY_YEAR_TY
     return final_team_pr_feature_vector
 
 
-def train_match_predictor_model(pr_feature_vector, transformed_data):
-    yearly_team_pr_models = []
-    all_team_features = []
+def train_match_predictor_model(
+    pr_feature_vector: Callable[[torch.Tensor], torch.Tensor],
+    transformed_data: DATAFRAME_BY_YEAR_TYPE,
+):
+    yearly_match_models = []
+    team_a_features = []
+    team_b_features = []
+    win_probabilities = []
     year_data_cache = {}
 
     for year, year_data in transformed_data.items():
         players_stats = year_data["players_stats"]["team_players_stats"]
         matchups_data = year_data["matches"]["teams_matchups_stats"]
 
-        team_a_tensor, team_b_tensor, win_probabilities_tensor, feature_names = (
-            create_match_input_tensors(matchups_data)
+        team_a_tensor, team_b_tensor, win_probabilities, feature_names = (
+            create_match_input_tensors(pr_feature_vector, players_stats, matchups_data)
         )
 
-        team_a_features = 1
-        team_b_features = 1
-        match_predictor_nn = MatchPredictorNeuralNetwork(
-            len(team_a_features) + len(team_b_features)
-        )
+        team_a_mask = ~(torch.isnan(team_a_tensor).any(dim=1))
+        team_b_mask = ~(torch.isnan(team_b_tensor).any(dim=1))
+        team_a_tensor = team_a_tensor[team_a_mask]
+        team_b_tensor = team_b_tensor[team_b_mask]
+
+        year_data_cache[year] = {
+            "team_a_tensor": team_a_tensor,
+            "team_b_tensor": team_b_tensor,
+            "feature_names": feature_names,
+        }
+        team_a_features.append(team_a_tensor.numpy())
+        team_b_features.append(team_b_tensor.numpy())
+        win_probabilities.append(win_probabilities.numpy())
+
+    for year in transformed_data.keys():
+        print(f"Training for year: {year}")
+        team_a_tensor = year_data_cache[year]["team_a_tensor"]
+        team_b_tensor = year_data_cache[year]["team_b_tensor"]
+        feature_names = year_data_cache[year]["feature_names"]
+
+        input_size = len(team_a_tensor[0]) + len(team_b_tensor[0])
+        match_predictor_nn = MatchPredictorNeuralNetwork(input_size=input_size)
         match_predictor_nn.train_model(team_a_tensor, team_b_tensor)
 
+        yearly_match_models.append(match_predictor_nn)
 
-def train(years):
+    # final_team_pr_feature_vector = create_final_pr_feature_vector(yearly_team_pr_models)
+    # return final_team_pr_feature_vector
+    # team_a_features = 1
+    # team_b_features = 1
+    # match_predictor_nn = MatchPredictorNeuralNetwork(
+    #     len(team_a_features) + len(team_b_features)
+    # )
+    # match_predictor_nn.train_model(team_a_tensor, team_b_tensor, win_probabilities)
+
+
+def train(years: list[str]):
     dataframes_by_year = read_in_data("data", years)
     transformed_data = transform_data(dataframes_by_year)
     pr_feature_vector = get_power_rating_model_feature_vector(transformed_data)
+    match_predictor_model = train_match_predictor_model(
+        pr_feature_vector, transformed_data
+    )
 
 
 def test(years):
