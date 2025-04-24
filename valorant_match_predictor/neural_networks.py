@@ -38,7 +38,7 @@ class MatchPredictorNeuralNetwork(nn.Module):
         team_b_features: torch.Tensor,
         win_labels: torch.Tensor,
         epochs: int = 100,
-        learning_rate: float = 1e-3,
+        learning_rate: float = 0.001,
         batch_size: int = 16,
     ):
         optimizer = torch.optim.Adam(self.parameters(), lr=learning_rate)
@@ -117,10 +117,10 @@ class PowerRatingNeuralNetwork(nn.Module):
     def train_model(
         self,
         feature_tensor: torch.Tensor,
-        epochs: int = 200,
-        learning_rate: float = 1e-4,
+        epochs: int = 100,
+        learning_rate: float = 0.001,
         batch_size: int = 16,
-        print_every: int = 20,
+        print_every: int = 10,
     ) -> None:
         # print(feature_tensor)
         assert not torch.isnan(feature_tensor).any(), "Input contains NaN!"

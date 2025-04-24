@@ -174,20 +174,38 @@ def create_pr_input_tensor(
     return team_pr_tensor, feature_names
 
 
-def create_final_pr_feature_vector(
+def create_final_pr_model(
     models: list[PowerRatingNeuralNetwork],
 ) -> Callable[[torch.Tensor], torch.Tensor]:
-    def final_pr_vector(team_features: torch.Tensor) -> torch.Tensor:
+    def final_predication(team_features: torch.Tensor) -> torch.Tensor:
         for m in models:
             m.eval()
         with torch.no_grad():
             preds = torch.stack([m.encode(team_features) for m in models], dim=0)
             return preds
 
-    return final_pr_vector
+    return final_predication
 
 
-def get_power_rating_model_feature_vector(
+def create_final_match_model(
+    models: list[MatchPredictorNeuralNetwork],
+) -> Callable[[torch.Tensor, torch.Tensor], float]:
+    def final_prediction(
+        team_a_features: torch.Tensor, team_b_features: torch.Tensor
+    ) -> float:
+        for model in models:
+            model.eval()
+
+        with torch.no_grad():
+            predictions = torch.stack(
+                [model(team_a_features, team_b_features) for model in models]
+            )
+            return torch.mean(predictions, dim=0)
+
+    return final_prediction
+
+
+def get_power_rating_model(
     transformed_data: DATAFRAME_BY_YEAR_TYPE,
 ) -> Callable[[torch.Tensor], torch.Tensor]:
     scaler = StandardScaler()
@@ -227,26 +245,69 @@ def get_power_rating_model_feature_vector(
 
         yearly_team_pr_models.append(team_pr_nn)
 
-    final_team_pr_feature_vector = create_final_pr_feature_vector(yearly_team_pr_models)
-    return final_team_pr_feature_vector
+    final_team_pr_model = create_final_pr_model(yearly_team_pr_models)
+    return final_team_pr_model
 
 
-def train_match_predictor_model(
-    pr_feature_vector: Callable[[torch.Tensor], torch.Tensor],
+def get_match_predictor_model(
+    pr_model: Callable[[torch.Tensor], torch.Tensor],
     transformed_data: DATAFRAME_BY_YEAR_TYPE,
-):
+) -> Callable[[torch.Tensor], torch.Tensor]:
     yearly_match_models = []
-    team_a_features = []
-    team_b_features = []
-    win_probabilities = []
-    year_data_cache = {}
-
     for year, year_data in transformed_data.items():
         players_stats = year_data["players_stats"]["team_players_stats"]
         matchups_data = year_data["matches"]["teams_matchups_stats"]
 
-        team_a_tensor, team_b_tensor, win_probabilities, feature_names = (
-            create_match_input_tensors(pr_feature_vector, players_stats, matchups_data)
+        team_a_tensor, team_b_tensor, win_probabilities, _ = create_match_input_tensors(
+            pr_model, players_stats, matchups_data
+        )
+
+        combined_mask = ~(torch.isnan(team_a_tensor).any(dim=1)) & ~(
+            torch.isnan(team_b_tensor).any(dim=1)
+        )
+        team_a_tensor = team_a_tensor[combined_mask]
+        team_b_tensor = team_b_tensor[combined_mask]
+        win_probabilities = win_probabilities[combined_mask]
+
+        input_size = len(team_a_tensor[0]) + len(team_b_tensor[0])
+        print(input_size)
+        match_predictor_nn = MatchPredictorNeuralNetwork(input_size=input_size)
+        match_predictor_nn.train_model(team_a_tensor, team_b_tensor, win_probabilities)
+
+        yearly_match_models.append(match_predictor_nn)
+
+    final_match_model = create_final_match_model(yearly_match_models)
+    return final_match_model
+
+
+def train(
+    years: list[str],
+) -> tuple[
+    Callable[[torch.Tensor], torch.Tensor], Callable[[torch.Tensor], torch.Tensor]
+]:
+    dataframes_by_year = read_in_data("data", years)
+    transformed_data = transform_data(dataframes_by_year)
+    pr_model = get_power_rating_model(transformed_data)
+    match_predictor_model = get_match_predictor_model(pr_model, transformed_data)
+
+    return pr_model, match_predictor_model
+
+
+def test(
+    pr_model: Callable[[torch.Tensor], torch.Tensor],
+    match_model: Callable[[torch.Tensor], torch.Tensor],
+    years: list[str],
+):
+    dataframes_by_year = read_in_data("data", years)
+    transformed_data = transform_data(dataframes_by_year)
+
+    yearly_predictions = []
+    for year, year_data in transformed_data.items():
+        players_stats = year_data["players_stats"]["team_players_stats"]
+        matchups_data = year_data["matches"]["teams_matchups_stats"]
+
+        team_a_tensor, team_b_tensor, win_probabilities, _ = create_match_input_tensors(
+            pr_model, players_stats, matchups_data
         )
 
         team_a_mask = ~(torch.isnan(team_a_tensor).any(dim=1))
@@ -254,48 +315,13 @@ def train_match_predictor_model(
         team_a_tensor = team_a_tensor[team_a_mask]
         team_b_tensor = team_b_tensor[team_b_mask]
 
-        year_data_cache[year] = {
-            "team_a_tensor": team_a_tensor,
-            "team_b_tensor": team_b_tensor,
-            "feature_names": feature_names,
-        }
-        team_a_features.append(team_a_tensor.numpy())
-        team_b_features.append(team_b_tensor.numpy())
-        win_probabilities.append(win_probabilities.numpy())
+        prediction = match_model(team_a_tensor, team_b_tensor)
+        yearly_predictions.append(prediction)
 
-    for year in transformed_data.keys():
-        print(f"Training for year: {year}")
-        team_a_tensor = year_data_cache[year]["team_a_tensor"]
-        team_b_tensor = year_data_cache[year]["team_b_tensor"]
-        feature_names = year_data_cache[year]["feature_names"]
-
-        input_size = len(team_a_tensor[0]) + len(team_b_tensor[0])
-        match_predictor_nn = MatchPredictorNeuralNetwork(input_size=input_size)
-        match_predictor_nn.train_model(team_a_tensor, team_b_tensor)
-
-        yearly_match_models.append(match_predictor_nn)
-
-    # final_team_pr_feature_vector = create_final_pr_feature_vector(yearly_team_pr_models)
-    # return final_team_pr_feature_vector
-    # team_a_features = 1
-    # team_b_features = 1
-    # match_predictor_nn = MatchPredictorNeuralNetwork(
-    #     len(team_a_features) + len(team_b_features)
-    # )
-    # match_predictor_nn.train_model(team_a_tensor, team_b_tensor, win_probabilities)
-
-
-def train(years: list[str]):
-    dataframes_by_year = read_in_data("data", years)
-    transformed_data = transform_data(dataframes_by_year)
-    pr_feature_vector = get_power_rating_model_feature_vector(transformed_data)
-    match_predictor_model = train_match_predictor_model(
-        pr_feature_vector, transformed_data
-    )
-
-
-def test(years):
-    pass
+        print("Prediction:")
+        print(prediction)
+        print("\nExpected:")
+        print(win_probabilities)
 
 
 if __name__ == "__main__":
@@ -306,5 +332,5 @@ if __name__ == "__main__":
         precision=4,  # decimal precision
     )
     set_pandas_options()
-    train(years=["2023"])
-    test(years=["2025"])
+    pr_model, match_model = train(years=["2023"])
+    test(pr_model, match_model, years=["2025"])
