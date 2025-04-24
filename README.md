@@ -34,9 +34,12 @@ I like valorant!
     poetry install
     ```
 
-4) Run program
+4) Running the various programs
     ```
     poetry run python3 -m valorant_match_predictor.main
+    ```
+    ```
+    poetry run python3 -m match_odds_scraper.main
     ```
 
 ## Updating Dependencies

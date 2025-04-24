@@ -40,6 +40,8 @@ threadpoolctl = "3.6.0"
 torch = "2.6.0"
 typing-extensions = "4.12.2"
 tzdata = "2025.1"
+requests = "^2.32.3"
+beautifulsoup4 = "^4.13.4"
 
 
 [build-system]
