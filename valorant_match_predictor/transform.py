@@ -177,24 +177,32 @@ def transform_maps_scores(maps_scores_df: pd.DataFrame) -> pd.DataFrame:
         "Team B Score",
         "Team B Overtime Score",
     ]
+    maps_scores_df["Team A Overtime Score"] = maps_scores_df[
+        "Team A Overtime Score"
+    ].fillna(0)
+    maps_scores_df["Team B Overtime Score"] = maps_scores_df[
+        "Team B Overtime Score"
+    ].fillna(0)
     maps_scores_filtered = (
         filter_out_non_regional_tournaments(maps_scores_df)[USEFUL_MAPS_SCORES_COLUMNS]
         .copy()
         .dropna()
     )
-    maps_scores_filtered["Team A Map Score"] = maps_scores_filtered[
-        "Team A Score"
-    ] + maps_scores_filtered["Team A Overtime Score"].fillna(0)
-    maps_scores_filtered["Team B Map Score"] = maps_scores_filtered[
-        "Team B Score"
-    ] + maps_scores_filtered["Team B Overtime Score"].fillna(0)
 
+    maps_scores_filtered["Team A Map Score"] = (
+        maps_scores_filtered["Team A Score"]
+        + maps_scores_filtered["Team A Overtime Score"]
+    )
+    maps_scores_filtered["Team B Map Score"] = (
+        maps_scores_filtered["Team B Score"]
+        + maps_scores_filtered["Team B Overtime Score"]
+    )
     all_teams = pd.concat(
         [maps_scores_filtered["Team A"], maps_scores_filtered["Team B"]]
-    ).unique()
+    )
 
     all_matchup_stats = {}
-    for team_a in all_teams[:10]:
+    for team_a in all_teams[10:]:
         team_a_as_a = maps_scores_filtered[maps_scores_filtered["Team A"] == team_a]
         team_a_as_b = maps_scores_filtered[maps_scores_filtered["Team B"] == team_a]
 
@@ -236,8 +244,9 @@ def transform_data(
     return transformed_dataframes_by_year
 
 
-def read_in_data(folder_name: str = "data") -> DATAFRAME_BY_YEAR_TYPE:
+def read_in_data(folder_name: str, years: list[str]) -> DATAFRAME_BY_YEAR_TYPE:
     # Dataset -> SEE README.md
+    transformed_years = set([f"vct_{year}" for year in years])
     USEFUL_CSVS = {
         "players_stats": ["players_stats"],
         "matches": [
@@ -253,7 +262,7 @@ def read_in_data(folder_name: str = "data") -> DATAFRAME_BY_YEAR_TYPE:
     subfolders = [
         subfolder
         for subfolder in os.listdir(base_path)
-        if subfolder.startswith("vct_20") and subfolder not in ["vct_2021", "vct_2025"]
+        if subfolder.startswith("vct_20") and subfolder in transformed_years
     ]
     csv_folders_and_basenames = [
         [data_folder, csv_basename]
