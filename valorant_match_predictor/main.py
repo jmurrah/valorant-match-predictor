@@ -280,6 +280,25 @@ def get_match_predictor_model(
     return final_match_model
 
 
+def compute_odds(yearly_probabilities):
+    for probabilities in yearly_probabilities:
+        eps = 1e-6
+        probs = np.clip(probabilities.squeeze(1).cpu().numpy(), eps, 1 - eps)
+        odds_a = 1.0 / probs
+        odds_b = 1.0 / (1.0 - probs)
+
+        df = pd.DataFrame(
+            {
+                "Team A Odds": odds_a,
+                "Team B Odds": odds_b,
+                "Original Team A Win Probability": probs,
+            }
+        )
+
+        pd.set_option("display.float_format", "{:.2f}".format)
+        print(df.head())
+
+
 def train(
     years: list[str],
 ) -> tuple[
@@ -301,7 +320,7 @@ def test(
     dataframes_by_year = read_in_data("data", years)
     transformed_data = transform_data(dataframes_by_year)
 
-    yearly_predictions = []
+    yearly_probabilities = []
     for year, year_data in transformed_data.items():
         players_stats = year_data["players_stats"]["team_players_stats"]
         matchups_data = year_data["matches"]["teams_matchups_stats"]
@@ -315,13 +334,10 @@ def test(
         team_a_tensor = team_a_tensor[team_a_mask]
         team_b_tensor = team_b_tensor[team_b_mask]
 
-        prediction = match_model(team_a_tensor, team_b_tensor)
-        yearly_predictions.append(prediction)
+        probabilities = match_model(team_a_tensor, team_b_tensor)
+        yearly_probabilities.append(probabilities)
 
-        print("Prediction:")
-        print(prediction)
-        print("\nExpected:")
-        print(win_probabilities)
+    compute_odds(yearly_probabilities)
 
 
 if __name__ == "__main__":
