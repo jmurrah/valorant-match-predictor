@@ -1,7 +1,7 @@
 from collections import defaultdict
 from pathlib import Path
 
-import csv, os
+import csv
 
 GLOBAL_TOURNAMENTS = ["Masters", "Valorant Champions"]
 REGIONAL_TOURNAMENTS = ["Americas", "EMEA", "Pacific", "China"]
@@ -13,7 +13,6 @@ def load_year_match_odds_from_csv(year: str) -> dict[str, dict[str, float]]:
         / f"{year}_thunderbird_match_odds.csv"
     )
 
-    print(os.getcwd())
     match_odds = defaultdict(dict)
     with in_file.open(newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)

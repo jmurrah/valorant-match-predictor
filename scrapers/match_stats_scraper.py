@@ -25,18 +25,37 @@ def parse_match_date(soup: BeautifulSoup):
     }
 
 
+def extract_team_pages(soup: BeautifulSoup) -> tuple[str, str]:
+    """
+    Given a BeautifulSoup for a match page, return the two absolute URLs
+    for the teams that are playing.
+    """
+    base = "https://www.vlr.gg"
+    vs_block = soup.find("div", class_="match-header-vs")
+
+    team_links = []
+    for a in vs_block.find_all("a", class_="match-header-link"):
+        href = a.get("href", "")
+        full = urljoin(base, href)
+        if full not in team_links:
+            team_links.append(full)
+
+    return tuple(team_links)
+
+
 def parse_match(match_url: str):
     resp = requests.get(match_url, headers=HEADERS, timeout=15)
     resp.raise_for_status()
     soup = BeautifulSoup(resp.text, "html.parser")
 
     match_date = parse_match_date(soup)
+    team_pages = extract_team_pages(soup)
     print(match_date)
+    print(team_pages)
 
 
 if __name__ == "__main__":
     print("hello")
-    print(os.getcwd())
     for match_url in list(load_year_match_odds_from_csv("2024").keys())[:3]:
-        print(match_url)
+        print(f"\n{match_url}")
         parse_match(match_url)
