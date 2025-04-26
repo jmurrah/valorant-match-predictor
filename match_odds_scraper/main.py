@@ -148,9 +148,11 @@ def get_match_odds(url: str) -> dict[str, float]:
         return {}
 
 
-def save_year_odds_to_csv(year: str, match_odds: dict[str, dict[str, float]]) -> None:
+def save_year_match_odds_to_csv(
+    year: str, match_odds: dict[str, dict[str, float]]
+) -> None:
     """Write one CSV row per match: match_url, team_a, odd_a, team_b, odd_b."""
-    out_file = Path("match_odds_scraper/match_odds") / f"{year}_match_odds.csv"
+    out_file = Path("thunderbird_match_odds") / f"{year}_thunderbird_match_odds.csv"
     out_file.parent.mkdir(parents=True, exist_ok=True)
 
     with out_file.open("w", newline="", encoding="utf-8") as f:
@@ -162,7 +164,7 @@ def save_year_odds_to_csv(year: str, match_odds: dict[str, dict[str, float]]) ->
 
 
 if __name__ == "__main__":
-    years = ["2024"]
+    years = ["2025"]
 
     for year in years:
         yearly_match_odds = defaultdict(dict)
@@ -177,5 +179,5 @@ if __name__ == "__main__":
             for team, odd in odds.items():
                 log.info(f"   {team}: {odd:.2f}")
 
-        save_year_odds_to_csv(year, yearly_match_odds)
+        save_year_match_odds_to_csv(year, yearly_match_odds)
         log.info(f"Saved {len(yearly_match_odds)} matches for {year}")
