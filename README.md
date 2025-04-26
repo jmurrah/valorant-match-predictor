@@ -27,16 +27,24 @@ I like valorant!
     poetry --version
     ```
 
-3) Launch poetry shell and install dependencies
+3) Launch poetry shell
     ```
     poetry shell
 
     poetry install
     ```
 
-4) Run program
+4) Install dependencies
     ```
-    poetry run python3 -m valorant_match_predictor.main
+    make install
+    ```
+
+5) Running the various programs
+    ```
+    make model
+    ```
+    ```
+    make scrape
     ```
 
 ## Updating Dependencies
