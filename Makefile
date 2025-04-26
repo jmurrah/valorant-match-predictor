@@ -10,5 +10,8 @@ clean:
 model:
 	poetry run python3 -m valorant_match_predictor.main
 
-scrape:
-	poetry run python3 -m match_odds_scraper.main
+scrape-odds:
+	poetry run python3 -m scrapers.match_odds_scraper
+
+scrape-matches:
+	poetry run python3 -m scrapers.match_stats_scraper
