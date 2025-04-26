@@ -42,7 +42,10 @@ typing-extensions = "4.12.2"
 tzdata = "2025.1"
 requests = "^2.32.3"
 beautifulsoup4 = "^4.13.4"
+playwright = {version = "^1.51.0", extras = ["chromium"]}
 
+[tool.scripts]
+post-install = "playwright install"
 
 [build-system]
 requires = ["poetry-core"]

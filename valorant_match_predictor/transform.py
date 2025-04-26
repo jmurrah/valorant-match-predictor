@@ -11,6 +11,7 @@ REGIONAL_TOURNAMENTS = ["Americas", "EMEA", "Pacific", "China"]
 
 
 def filter_out_non_regional_tournaments(dataframe: pd.DataFrame) -> pd.DataFrame:
+    # in the future we will get ALL tournaments
     return dataframe[
         dataframe["Tournament"].str.contains(
             "|".join(REGIONAL_TOURNAMENTS), case=False, na=False
