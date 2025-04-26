@@ -5,6 +5,8 @@ from sklearn.preprocessing import StandardScaler
 
 from typing import Callable
 
+from helper import load_year_match_odds_from_csv
+
 from valorant_match_predictor import (
     DATAFRAME_BY_YEAR_TYPE,
     PowerRatingNeuralNetwork,

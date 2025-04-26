@@ -10,18 +10,8 @@ import requests
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 
-GLOBAL_TOURNAMENTS = ["Masters", "Valorant Champions"]
-REGIONAL_TOURNAMENTS = ["Americas", "EMEA", "Pacific", "China"]
-
-HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/114.0.0.0 Safari/537.36"
-    ),
-    "Cache-Control": "no-cache",
-    "Pragma": "no-cache",
-}
+from scrapers import HEADERS
+from helper import GLOBAL_TOURNAMENTS, REGIONAL_TOURNAMENTS
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
