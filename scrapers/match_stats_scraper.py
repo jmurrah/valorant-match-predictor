@@ -1,13 +1,17 @@
 import re, os, requests
 
 from bs4 import BeautifulSoup
-from urllib.parse import urljoin
+from urllib.parse import urlparse, urlunparse, urljoin
 from datetime import datetime
 
 import pandas as pd
 
 from scrapers import HEADERS, BASE_URL
-from helper import load_year_match_odds_from_csv, setup_display_options
+from helper import (
+    load_year_match_odds_from_csv,
+    setup_display_options,
+    REGIONAL_TOURNAMENTS,
+)
 
 
 def parse_match_date(soup: BeautifulSoup):
@@ -98,32 +102,26 @@ def get_team_match_page(team_page: str):
     return re.sub(pattern, repl, team_page)
 
 
-def get_prev_n_match_stats(original_match_url: str, team_page: str, n: int = 10):
+def get_prev_n_match_stats(original_match_url: str, team_page: str, n: int = 7):
+    # NOTE: this will only work for matches that appear on the 1st page of the match history
     team_match_page = get_team_match_page(team_page)
-    match_urls = []
 
     resp = requests.get(team_match_page, headers=HEADERS)
     resp.raise_for_status()
     soup = BeautifulSoup(resp.text, "html.parser")
 
-    pattern = re.compile(r"^/\d+/.+")
-    raw_links = [
-        urljoin("https://www.vlr.gg", a["href"])
-        for a in soup.find_all("a", href=pattern)
-    ]
+    container = soup.find("div", class_="mod-dark")
+    rows = container.select("a.wf-card.m-item")
 
-    seen = set()
-    unique_links = []
-    for link in raw_links:
-        if link not in seen:
-            seen.add(link)
-            unique_links.append(link)
-    try:
-        idx = unique_links.index(original_match_url)
-    except ValueError:
-        raise ValueError(f"Target match URL not found in listing: {original_match_url}")
+    matches, seen = [], set()
+    for a in rows:
+        base = urljoin("https://www.vlr.gg", a["href"].split("?")[0])
+        if base not in seen and any([t.lower() in base for t in REGIONAL_TOURNAMENTS]):
+            seen.add(base)
+            matches.append(base)
 
-    return unique_links[idx + 1 : idx + 1 + n]
+    idx = matches.index(original_match_url)
+    return matches[idx + 1 : idx + 1 + n]
 
 
 if __name__ == "__main__":
@@ -132,6 +130,9 @@ if __name__ == "__main__":
     for match_url in list(load_year_match_odds_from_csv("2024").keys())[:1]:
         print(f"\n{match_url}")
         current_match_data = parse_match(match_url)
-        print(current_match_data["match_date"])
-        team_a_prev_matches = get_prev_n_match_stats(current_match_data["team_a_page"])
-        team_b_prev_matches = get_prev_n_match_stats(current_match_data["team_b_page"])
+        team_a_prev_matches = get_prev_n_match_stats(
+            match_url, current_match_data["team_a_page"]
+        )
+        team_b_prev_matches = get_prev_n_match_stats(
+            match_url, current_match_data["team_b_page"]
+        )
