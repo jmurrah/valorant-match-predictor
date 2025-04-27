@@ -4,10 +4,10 @@ import pandas as pd
 
 from collections import defaultdict
 
+from helper import GLOBAL_TOURNAMENTS, REGIONAL_TOURNAMENTS
+
 
 DATAFRAME_BY_YEAR_TYPE = dict[str, dict[str, dict[str, pd.DataFrame]]]
-GLOBAL_TOURNAMENTS = ["Masters", "Valorant Champions"]
-REGIONAL_TOURNAMENTS = ["Americas", "EMEA", "Pacific", "China"]
 
 
 def filter_out_non_regional_tournaments(dataframe: pd.DataFrame) -> pd.DataFrame:

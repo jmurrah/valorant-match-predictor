@@ -10,18 +10,8 @@ import requests
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 
-GLOBAL_TOURNAMENTS = ["Masters", "Valorant Champions"]
-REGIONAL_TOURNAMENTS = ["Americas", "EMEA", "Pacific", "China"]
-
-HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/114.0.0.0 Safari/537.36"
-    ),
-    "Cache-Control": "no-cache",
-    "Pragma": "no-cache",
-}
+from scrapers import HEADERS
+from helper import GLOBAL_TOURNAMENTS, REGIONAL_TOURNAMENTS
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
@@ -148,9 +138,14 @@ def get_match_odds(url: str) -> dict[str, float]:
         return {}
 
 
-def save_year_odds_to_csv(year: str, match_odds: dict[str, dict[str, float]]) -> None:
+def save_year_match_odds_to_csv(
+    year: str, match_odds: dict[str, dict[str, float]]
+) -> None:
     """Write one CSV row per match: match_url, team_a, odd_a, team_b, odd_b."""
-    out_file = Path("match_odds_scraper/match_odds") / f"{year}_match_odds.csv"
+    out_file = (
+        Path("scraped_data/thunderbird_match_odds")
+        / f"{year}_thunderbird_match_odds.csv"
+    )
     out_file.parent.mkdir(parents=True, exist_ok=True)
 
     with out_file.open("w", newline="", encoding="utf-8") as f:
@@ -162,7 +157,7 @@ def save_year_odds_to_csv(year: str, match_odds: dict[str, dict[str, float]]) ->
 
 
 if __name__ == "__main__":
-    years = ["2024"]
+    years = ["2025"]
 
     for year in years:
         yearly_match_odds = defaultdict(dict)
@@ -177,5 +172,5 @@ if __name__ == "__main__":
             for team, odd in odds.items():
                 log.info(f"   {team}: {odd:.2f}")
 
-        save_year_odds_to_csv(year, yearly_match_odds)
+        save_year_match_odds_to_csv(year, yearly_match_odds)
         log.info(f"Saved {len(yearly_match_odds)} matches for {year}")
