@@ -5,7 +5,7 @@ from sklearn.preprocessing import StandardScaler
 
 from typing import Callable
 
-from helper import load_year_match_odds_from_csv, setup_display_options
+from helper import load_year_match_odds_from_csv, set_display_options
 
 from valorant_match_predictor import (
     DATAFRAME_BY_YEAR_TYPE,
@@ -352,7 +352,7 @@ def test(
 
 
 if __name__ == "__main__":
-    setup_display_options()
+    set_display_options()
     pr_model, match_model = train(years=["2022", "2023"])
     thunderbird_match_odds = load_year_match_odds_from_csv("2024")
     # print(thunderbird_match_odds)

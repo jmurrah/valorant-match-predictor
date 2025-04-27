@@ -1,7 +1,7 @@
 import re, os, requests
 
 from bs4 import BeautifulSoup
-from urllib.parse import urlparse, urlunparse, urljoin
+from urllib.parse import urljoin
 from datetime import datetime
 
 import pandas as pd
@@ -9,7 +9,7 @@ import pandas as pd
 from scrapers import HEADERS, BASE_URL
 from helper import (
     load_year_match_odds_from_csv,
-    setup_display_options,
+    set_display_options,
     REGIONAL_TOURNAMENTS,
 )
 
@@ -91,7 +91,8 @@ def parse_match(match_url: str):
         "match_date": parse_match_date(soup),
         "team_a_page": team_a_page,
         "team_b_page": team_b_page,
-        "match_stats": get_player_stats(soup),
+        "player_stats": get_player_stats(soup),
+        "map_wins": 1,
     }
     return match_data
 
@@ -102,7 +103,7 @@ def get_team_match_page(team_page: str):
     return re.sub(pattern, repl, team_page)
 
 
-def get_prev_n_match_stats(original_match_url: str, team_page: str, n: int = 7):
+def get_prev_n_match_urls(original_match_url: str, team_page: str, n: int = 7):
     # NOTE: this will only work for matches that appear on the 1st page of the match history
     team_match_page = get_team_match_page(team_page)
 
@@ -115,7 +116,7 @@ def get_prev_n_match_stats(original_match_url: str, team_page: str, n: int = 7):
 
     matches, seen = [], set()
     for a in rows:
-        base = urljoin("https://www.vlr.gg", a["href"].split("?")[0])
+        base = urljoin(BASE_URL, a["href"].split("?")[0])
         if base not in seen and any([t.lower() in base for t in REGIONAL_TOURNAMENTS]):
             seen.add(base)
             matches.append(base)
@@ -126,13 +127,20 @@ def get_prev_n_match_stats(original_match_url: str, team_page: str, n: int = 7):
 
 if __name__ == "__main__":
     print("hello")
-    setup_display_options()
+    set_display_options()
+
     for match_url in list(load_year_match_odds_from_csv("2024").keys())[:1]:
         print(f"\n{match_url}")
         current_match_data = parse_match(match_url)
-        team_a_prev_matches = get_prev_n_match_stats(
+        team_a_prev_matches = get_prev_n_match_urls(
             match_url, current_match_data["team_a_page"]
         )
-        team_b_prev_matches = get_prev_n_match_stats(
+        team_b_prev_matches = get_prev_n_match_urls(
             match_url, current_match_data["team_b_page"]
         )
+
+        # for match_url in team_a_prev_matches:
+        #     match_data = parse_match(match_url)
+
+        # for match_url in team_b_prev_matches:
+        #     match_data = parse_match(match_url)

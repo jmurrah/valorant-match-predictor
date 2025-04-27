@@ -27,7 +27,7 @@ def load_year_match_odds_from_csv(year: str) -> dict[str, dict[str, float]]:
     return match_odds
 
 
-def setup_display_options():
+def set_display_options():
     torch.set_printoptions(
         threshold=int(1e8),
         edgeitems=3,
