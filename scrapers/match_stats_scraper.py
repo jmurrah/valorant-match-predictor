@@ -167,24 +167,17 @@ def get_prev_n_match_urls(
     container = soup.find("div", class_="mod-dark")
     rows = container.select("a.wf-card.m-item")
 
-    matches, seen = [original_match_url], set()
+    matches = []
     for a in rows:
-        base = urljoin(BASE_URL, a["href"].split("?")[0])
-        names = [s.get_text(strip=True) for s in a.select("span.m-item-team-name")]
-        if (
-            base not in seen
-            and any([t.lower() in base for t in REGIONAL_TOURNAMENTS])
-            # and excluded_team not in names
+        new_match_url = urljoin(BASE_URL, a["href"].split("?")[0])
+        names = set([s.get_text(strip=True) for s in a.select("span.m-item-team-name")])
+        if new_match_url == original_match_url or (
+            excluded_team not in names
+            and any([t.lower() in new_match_url for t in REGIONAL_TOURNAMENTS])
         ):
-            # print(names)
-            seen.add(base)
-            matches.append(base)
+            matches.append(new_match_url)
 
     idx = matches.index(original_match_url)
-    abc = matches[idx + 1 : idx + 1 + n]
-    print(f"\nEXCLUDE TEAM: {excluded_team}")
-    for i, m in enumerate(abc):
-        print(f"{i}: {m}")
     return matches[idx + 1 : idx + 1 + n]
 
 
@@ -218,7 +211,6 @@ if __name__ == "__main__":
         current_match_data = parse_match(soup)
         team_a = current_match_data["maps_data"][0]["team_a_name"]
         team_b = current_match_data["maps_data"][0]["team_b_name"]
-        print(team_a, team_b)
         team_a_prev_matches_urls = get_prev_n_match_urls(
             original_match_url=match_url,
             team_page=current_match_data["team_a_page"],
