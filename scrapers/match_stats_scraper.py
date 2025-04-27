@@ -93,7 +93,7 @@ def get_player_stats(soup: BeautifulSoup):
     return pd.DataFrame(team_stats)
 
 
-def parse_map_header(header):
+def parse_map_header(header: BeautifulSoup):
     team_a = header.find("div", class_="team")
     team_a_name = team_a.find("div", class_="team-name").get_text(strip=True)
     team_a_score = int(team_a.find("div", class_="score").get_text(strip=True))
@@ -106,12 +106,13 @@ def parse_map_header(header):
     name_div = map_div.find("div", style=lambda s: s and "font-weight" in s)
 
     pick_span = name_div.find("span", class_="picked")
-    pick_cls = [c for c in pick_span["class"] if c.startswith("mod-")][0]
-    picked_by = team_a_name if pick_cls == "mod-1" else team_b_name
+    if pick_span:
+        classes = pick_span.get("class", [])
+        pick_cls = next((c for c in classes if c.startswith("mod-")), None)
+        picked_by = team_a_name if pick_cls == "mod-1" else team_b_name
+    else:
+        picked_by = "DECIDER"
 
-    name_div = header.find("div", class_="map").find(
-        "div", style=lambda s: s and "font-weight" in s
-    )
     outer_span = name_div.find("span", recursive=False)
     map_name = outer_span.contents[0].strip()
 
@@ -178,7 +179,7 @@ def get_prev_n_match_urls(original_match_url: str, team_page: str, n: int = 7):
 if __name__ == "__main__":
     set_display_options()
 
-    for match_url in list(load_year_match_odds_from_csv("2024").keys())[3:4]:
+    for match_url in list(load_year_match_odds_from_csv("2024").keys())[:4]:
         print(f"\n{match_url}")
         current_match_data = parse_match(match_url)
         print(current_match_data["maps_data"])
