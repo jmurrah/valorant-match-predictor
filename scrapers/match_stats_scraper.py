@@ -1,8 +1,7 @@
-import re, os, requests
+import re, requests
 
 from bs4 import BeautifulSoup
-from playwright.sync_api import sync_playwright
-from urllib.parse import urljoin, urlparse, urlunparse
+from urllib.parse import urljoin
 from datetime import datetime
 
 import pandas as pd
@@ -94,92 +93,7 @@ def get_player_stats(soup: BeautifulSoup):
     return pd.DataFrame(team_stats)
 
 
-def get_all_map_soups(map_urls):
-    print(map_urls)
-    soups = []
-    user_agent = HEADERS["User-Agent"]
-    with sync_playwright() as pw:
-        browser = pw.chromium.launch(headless=True)
-        # Create a single context and page to reuse
-        context = browser.new_context(user_agent=user_agent, ignore_https_errors=True)
-        page = context.new_page()
-
-        for url in map_urls:
-            try:
-                # Navigate to the map URL
-                # 'domcontentloaded' or 'load' might be sufficient and faster
-                # 'networkidle' waits for network requests to finish, which is safer but slower
-                page.goto(url, timeout=60_000, wait_until="networkidle")
-
-                # Optional: Add a small delay or wait for a specific element
-                # if 'networkidle' isn't enough sometimes
-                # page.wait_for_timeout(1000) # e.g., wait 1 second
-                # page.wait_for_selector("div.vm-stats-game-header", state="visible")
-
-                # Grab the HTML
-                html = page.content()
-                soups.append(BeautifulSoup(html, "html.parser"))
-
-            except Exception as e:
-                print(f"Error processing {url}: {e}")
-                # Decide how to handle errors: append None, skip, etc.
-                soups.append(None)  # Example: append None if a page fails
-
-        # Close context and browser outside the loop
-        context.close()
-        browser.close()
-
-    # Filter out any None values if you added error handling
-    return [s for s in soups if s is not None]
-
-
-def extract_match_maps(soup: BeautifulSoup) -> list[dict]:
-    base = "https://www.vlr.gg"
-    nav = soup.find("div", class_="vm-stats-gamesnav")
-    items = nav.find_all("div", class_="vm-stats-gamesnav-item")
-
-    played_maps = []
-    for item in items:
-        if item.get("data-game-id") == "all" or item.get("data-disabled") == "1":
-            continue
-
-        game_id = item["data-game-id"]
-        # build the correct URL: keep the path, add ?game=<id>&tab=overview
-        parts = urlparse(soup.find("link", rel="canonical")["href"])
-        # canonical link is like "/353177/…"
-        path = parts.path  # e.g. "/353177/mibr-vs-…"
-        # assemble final URL
-        url = urlunparse(
-            (
-                parts.scheme or "https",  # sometimes empty if parsed relative
-                parts.netloc or "www.vlr.gg",
-                path,
-                "",  # params
-                f"game={game_id}&tab=overview",  # query
-                "",  # fragment
-            )
-        )
-
-        # map number & name as before
-        label_div = item.find("div", style=lambda s: s and "line-height" in s)
-        num_text = label_div.find("span").get_text(strip=True)
-        name_text = label_div.get_text(strip=True).replace(num_text, "", 1).strip()
-
-        played_maps.append(
-            {
-                "game_id": game_id,
-                "map_number": int(num_text),
-                "map_name": name_text,
-                "url": url,
-            }
-        )
-
-    return played_maps
-
-
-def parse_map_header(soup: BeautifulSoup):
-    header = soup.find("div", class_="vm-stats-game-header")
-
+def parse_map_header(header):
     team_a = header.find("div", class_="team")
     team_a_name = team_a.find("div", class_="team-name").get_text(strip=True)
     team_a_score = int(team_a.find("div", class_="score").get_text(strip=True))
@@ -211,15 +125,9 @@ def parse_map_header(soup: BeautifulSoup):
     }
 
 
-def parse_match_maps(soup: BeautifulSoup):
-    maps = extract_match_maps(soup)
-    map_soups = get_all_map_soups([m["url"] for m in maps])
-
-    maps_data = []
-    for map_soup in map_soups:
-        maps_data.append(parse_map_header(map_soup))
-
-    return maps_data
+def parse_match_maps(soup):
+    header_divs = soup.find_all("div", class_="vm-stats-game-header")
+    return [parse_map_header(h) for h in header_divs]
 
 
 def parse_match(match_url: str):
@@ -228,7 +136,6 @@ def parse_match(match_url: str):
     soup = BeautifulSoup(resp.text, "html.parser")
 
     team_a_page, team_b_page = extract_team_pages(soup)
-
     match_data = {
         "match_url": match_url,
         "match_date": parse_match_date(soup),
@@ -271,7 +178,7 @@ def get_prev_n_match_urls(original_match_url: str, team_page: str, n: int = 7):
 if __name__ == "__main__":
     set_display_options()
 
-    for match_url in list(load_year_match_odds_from_csv("2024").keys())[:1]:
+    for match_url in list(load_year_match_odds_from_csv("2024").keys())[3:4]:
         print(f"\n{match_url}")
         current_match_data = parse_match(match_url)
         print(current_match_data["maps_data"])
