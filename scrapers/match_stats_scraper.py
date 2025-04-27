@@ -4,8 +4,10 @@ from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 from datetime import datetime
 
-from scrapers import HEADERS
-from helper import load_year_match_odds_from_csv
+import pandas as pd
+
+from scrapers import HEADERS, BASE_URL
+from helper import load_year_match_odds_from_csv, setup_display_options
 
 
 def parse_match_date(soup: BeautifulSoup):
@@ -26,21 +28,52 @@ def parse_match_date(soup: BeautifulSoup):
 
 
 def extract_team_pages(soup: BeautifulSoup) -> tuple[str, str]:
-    """
-    Given a BeautifulSoup for a match page, return the two absolute URLs
-    for the teams that are playing.
-    """
-    base = "https://www.vlr.gg"
     vs_block = soup.find("div", class_="match-header-vs")
 
     team_links = []
     for a in vs_block.find_all("a", class_="match-header-link"):
         href = a.get("href", "")
-        full = urljoin(base, href)
+        full = urljoin(BASE_URL, href)
         if full not in team_links:
             team_links.append(full)
 
-    return tuple(team_links)
+    return team_links
+
+
+def parse_table(table, headers):
+    rows = []
+    for tr in table.find("tbody").find_all("tr"):
+        cells = tr.find_all("td")
+
+        player_a = cells[0].find("a")
+        player_url = urljoin(BASE_URL, player_a["href"])
+        player_name = player_a.find("div", class_="text-of").get_text(strip=True)
+        team_tag = player_a.find("div", class_="ge-text-light").get_text(strip=True)
+        data = {"team_tag": team_tag, "player": player_name, "profile_url": player_url}
+
+        for header, cell in zip(headers[2:], cells[2:]):
+            val = cell.select_one("span.side.mod-both").get_text(strip=True)
+            data[header] = val
+
+        rows.append(data)
+
+    return rows
+
+
+def get_player_stats(soup: BeautifulSoup):
+    container = soup.find(
+        "div", class_="vm-stats-game mod-active", attrs={"data-game-id": "all"}
+    )
+
+    team_stats = []
+    for team_table in container.find_all("table", class_="wf-table-inset mod-overview"):
+        table_headers = [
+            th.get("title") or th.get_text(strip=True)
+            for th in team_table.find("thead").find_all("th")
+        ]
+        team_stats.extend(parse_table(team_table, table_headers))
+
+    return pd.DataFrame(team_stats)
 
 
 def parse_match(match_url: str):
@@ -48,14 +81,57 @@ def parse_match(match_url: str):
     resp.raise_for_status()
     soup = BeautifulSoup(resp.text, "html.parser")
 
-    match_date = parse_match_date(soup)
-    team_pages = extract_team_pages(soup)
-    print(match_date)
-    print(team_pages)
+    team_a_page, team_b_page = extract_team_pages(soup)
+    match_data = {
+        "match_url": match_url,
+        "match_date": parse_match_date(soup),
+        "team_a_page": team_a_page,
+        "team_b_page": team_b_page,
+        "match_stats": get_player_stats(soup),
+    }
+    return match_data
+
+
+def get_team_match_page(team_page: str):
+    pattern = r"^(https://www\.vlr\.gg)/team/(\d+)/(.*?)/?$"
+    repl = r"\1/team/matches/\2/\3/?group=completed"
+    return re.sub(pattern, repl, team_page)
+
+
+def get_prev_n_match_stats(original_match_url: str, team_page: str, n: int = 10):
+    team_match_page = get_team_match_page(team_page)
+    match_urls = []
+
+    resp = requests.get(team_match_page, headers=HEADERS)
+    resp.raise_for_status()
+    soup = BeautifulSoup(resp.text, "html.parser")
+
+    pattern = re.compile(r"^/\d+/.+")
+    raw_links = [
+        urljoin("https://www.vlr.gg", a["href"])
+        for a in soup.find_all("a", href=pattern)
+    ]
+
+    seen = set()
+    unique_links = []
+    for link in raw_links:
+        if link not in seen:
+            seen.add(link)
+            unique_links.append(link)
+    try:
+        idx = unique_links.index(original_match_url)
+    except ValueError:
+        raise ValueError(f"Target match URL not found in listing: {original_match_url}")
+
+    return unique_links[idx + 1 : idx + 1 + n]
 
 
 if __name__ == "__main__":
     print("hello")
-    for match_url in list(load_year_match_odds_from_csv("2024").keys())[:3]:
+    setup_display_options()
+    for match_url in list(load_year_match_odds_from_csv("2024").keys())[:1]:
         print(f"\n{match_url}")
-        parse_match(match_url)
+        current_match_data = parse_match(match_url)
+        print(current_match_data["match_date"])
+        team_a_prev_matches = get_prev_n_match_stats(current_match_data["team_a_page"])
+        team_b_prev_matches = get_prev_n_match_stats(current_match_data["team_b_page"])

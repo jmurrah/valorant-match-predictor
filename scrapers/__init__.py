@@ -7,3 +7,5 @@ HEADERS = {
     "Cache-Control": "no-cache",
     "Pragma": "no-cache",
 }
+
+BASE_URL = "https://www.vlr.gg"

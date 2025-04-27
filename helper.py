@@ -1,7 +1,9 @@
 from collections import defaultdict
 from pathlib import Path
 
-import csv
+import pandas as pd
+
+import csv, torch
 
 GLOBAL_TOURNAMENTS = ["Masters", "Valorant Champions"]
 REGIONAL_TOURNAMENTS = ["Americas", "EMEA", "Pacific", "China"]
@@ -23,3 +25,16 @@ def load_year_match_odds_from_csv(year: str) -> dict[str, dict[str, float]]:
             match_odds[match_url] = {team_a: odd_a, team_b: odd_b}
 
     return match_odds
+
+
+def setup_display_options():
+    torch.set_printoptions(
+        threshold=int(1e8),
+        edgeitems=3,
+        linewidth=200,
+        precision=4,
+    )
+    pd.set_option("display.max_columns", None)
+    pd.set_option("display.width", 1000)
+    pd.set_option("display.expand_frame_repr", False)
+    pd.set_option("display.max_rows", None)
