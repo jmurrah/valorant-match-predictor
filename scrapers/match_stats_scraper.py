@@ -93,7 +93,7 @@ def get_player_stats(soup: BeautifulSoup):
     return pd.DataFrame(team_stats)
 
 
-def parse_map_header(header: BeautifulSoup):
+def parse_map_header(header):
     team_a = header.find("div", class_="team")
     team_a_name = team_a.find("div", class_="team-name").get_text(strip=True)
     team_a_score = int(team_a.find("div", class_="score").get_text(strip=True))
@@ -126,12 +126,12 @@ def parse_map_header(header: BeautifulSoup):
     }
 
 
-def parse_match_maps(soup):
+def parse_match_maps(soup: BeautifulSoup):
     header_divs = soup.find_all("div", class_="vm-stats-game-header")
     return [parse_map_header(h) for h in header_divs]
 
 
-def parse_match(match_url: str):
+def parse_match(soup: BeautifulSoup):
     resp = requests.get(match_url, headers=HEADERS, timeout=15)
     resp.raise_for_status()
     soup = BeautifulSoup(resp.text, "html.parser")
@@ -154,7 +154,9 @@ def get_team_match_page(team_page: str):
     return re.sub(pattern, repl, team_page)
 
 
-def get_prev_n_match_urls(original_match_url: str, team_page: str, n: int = 7):
+def get_prev_n_match_urls(
+    original_match_url: str, team_page: str, excluded_team: str, n: int = 7
+):
     # NOTE: this will only work for matches that appear on the 1st page of the match history
     team_match_page = get_team_match_page(team_page)
 
@@ -165,30 +167,69 @@ def get_prev_n_match_urls(original_match_url: str, team_page: str, n: int = 7):
     container = soup.find("div", class_="mod-dark")
     rows = container.select("a.wf-card.m-item")
 
-    matches, seen = [], set()
+    matches, seen = [original_match_url], set()
     for a in rows:
         base = urljoin(BASE_URL, a["href"].split("?")[0])
-        if base not in seen and any([t.lower() in base for t in REGIONAL_TOURNAMENTS]):
+        names = [s.get_text(strip=True) for s in a.select("span.m-item-team-name")]
+        if (
+            base not in seen
+            and any([t.lower() in base for t in REGIONAL_TOURNAMENTS])
+            # and excluded_team not in names
+        ):
+            # print(names)
             seen.add(base)
             matches.append(base)
 
     idx = matches.index(original_match_url)
+    abc = matches[idx + 1 : idx + 1 + n]
+    print(f"\nEXCLUDE TEAM: {excluded_team}")
+    for i, m in enumerate(abc):
+        print(f"{i}: {m}")
     return matches[idx + 1 : idx + 1 + n]
+
+
+def get_prev_n_h2h_match_urls(soup: BeautifulSoup, n: int = 3):
+    urls = []
+    container = soup.find("div", class_="match-h2h-matches")
+    if not container:
+        return urls
+
+    for a in container.find_all("a", href=True):
+        full = urljoin(BASE_URL, a["href"])
+        urls.append(full)
+
+    return urls[:n]
+
+
+def summarize_prev_matches(match_urls: list[str]):
+    pass
 
 
 if __name__ == "__main__":
     set_display_options()
 
-    for match_url in list(load_year_match_odds_from_csv("2024").keys())[:4]:
+    for match_url in list(load_year_match_odds_from_csv("2024").keys())[:1]:
+        match_url = "https://www.vlr.gg/371273/leviat-n-vs-kr-esports-champions-tour-2024-americas-stage-2-lbf"
+        resp = requests.get(match_url, headers=HEADERS, timeout=15)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "html.parser")
+
         print(f"\n{match_url}")
-        current_match_data = parse_match(match_url)
-        print(current_match_data["maps_data"])
-        team_a_prev_matches = get_prev_n_match_urls(
-            match_url, current_match_data["team_a_page"]
+        current_match_data = parse_match(soup)
+        team_a = current_match_data["maps_data"][0]["team_a_name"]
+        team_b = current_match_data["maps_data"][0]["team_b_name"]
+        print(team_a, team_b)
+        team_a_prev_matches_urls = get_prev_n_match_urls(
+            original_match_url=match_url,
+            team_page=current_match_data["team_a_page"],
+            excluded_team=team_b,
         )
-        team_b_prev_matches = get_prev_n_match_urls(
-            match_url, current_match_data["team_b_page"]
+        team_b_prev_matches_urls = get_prev_n_match_urls(
+            original_match_url=match_url,
+            team_page=current_match_data["team_b_page"],
+            excluded_team=team_a,
         )
+        last_h2h_urls = get_prev_n_h2h_match_urls(soup, n=3)
 
         # for match_url in team_a_prev_matches:
         #     match_data = parse_match(match_url)
