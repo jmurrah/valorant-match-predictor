@@ -74,8 +74,8 @@ def create_match_input_tensors(
         matchup_data = matchups_data[matchups_data["Matchup"] == matchup]
         team_a, team_b = matchup.split("_vs_")
 
-        team_a_players_stats = players_stats[players_stats["Teams"] == team_a]
-        team_b_players_stats = players_stats[players_stats["Teams"] == team_b]
+        team_a_players_stats = players_stats[players_stats["Team"] == team_a]
+        team_b_players_stats = players_stats[players_stats["Team"] == team_b]
         team_a_vs_b_stats = matchup_data[
             (matchup_data["Team"] == "A") & (matchup_data["Opponent"] == "B")
         ]
@@ -152,8 +152,8 @@ def create_pr_input_tensor(
         matchup_data = matchups_data[matchups_data["Matchup"] == matchup]
         team_a, team_b = matchup.split("_vs_")
 
-        team_a_players_stats = players_stats[players_stats["Teams"] == team_a]
-        team_b_players_stats = players_stats[players_stats["Teams"] == team_b]
+        team_a_players_stats = players_stats[players_stats["Team"] == team_a]
+        team_b_players_stats = players_stats[players_stats["Team"] == team_b]
         team_a_vs_others_stats = matchup_data[
             (matchup_data["Team"] == "A") & (matchup_data["Opponent"] == "Others")
         ]

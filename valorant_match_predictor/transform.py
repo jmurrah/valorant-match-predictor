@@ -21,7 +21,7 @@ def filter_out_non_regional_tournaments(dataframe: pd.DataFrame) -> pd.DataFrame
 
 def transform_players_stats(players_stats_df: pd.DataFrame) -> pd.DataFrame:
     USEFUL_PLAYER_COLUMNS = [
-        "Teams",
+        "Team",
         "Rating",
         "Average Combat Score",
         "Kills:Deaths",

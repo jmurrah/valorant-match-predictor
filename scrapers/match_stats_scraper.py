@@ -264,7 +264,7 @@ def aggregate_prev_match_map_stats(match_urls: list[str], team_name: str):
 
 
 def aggregate_prev_matches_player_stats(
-    match_urls: list[str], team_tag: str
+    original_match_url: str, match_urls: list[str], team_tag: str, team_name: str
 ) -> pd.DataFrame:
     player_stats = []
     for match_url in match_urls:
@@ -311,13 +311,14 @@ def aggregate_prev_matches_player_stats(
         .to_frame()
         .T
     )
+    df.insert(0, "Matchup", original_match_url)
+    df.insert(1, "Team Name", team_name)
     return df
 
 
 # store the transformed data in a csv
 def create_teams_matchups_stats_df(
-    team_a,
-    team_b,
+    match_url,
     team_a_vs_b_stats,
     team_b_vs_a_stats,
     team_a_vs_others_stats,
@@ -325,7 +326,7 @@ def create_teams_matchups_stats_df(
 ):
     return pd.DataFrame(
         {
-            "Matchup": [f"{team_a}_vs_{team_b}"] * 4,
+            "Matchup": [match_url] * 4,
             "Team": ["A", "A", "B", "B"],
             "Opponent": ["B", "Others", "A", "Others"],
             "Round Win Pct": [
@@ -356,11 +357,15 @@ def create_teams_matchups_stats_csv(all_matchup_stats: dict):
     print(combined_df)
 
 
+def create_players_stats_csv(all_players_stats: list):
+    print(all_players_stats)
+
+
 if __name__ == "__main__":
     set_display_options()
     all_matchup_stats = {}
-    for match_url in list(load_year_match_odds_from_csv("2024").keys())[:1]:
-        match_url = "https://www.vlr.gg/371273/leviat-n-vs-kr-esports-champions-tour-2024-americas-stage-2-lbf"
+    all_players_stats = []
+    for match_url in list(load_year_match_odds_from_csv("2024").keys()):
         resp = requests.get(match_url, headers=HEADERS, timeout=15)
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, "html.parser")
@@ -383,32 +388,56 @@ if __name__ == "__main__":
         prev_h2h_urls = get_prev_n_h2h_match_urls(soup, n=3)
 
         team_a_agg_player_stats = aggregate_prev_matches_player_stats(
-            team_a_prev_matches_urls, current_match_data["team_a"]["tag"]
+            original_match_url=match_url,
+            match_urls=team_a_prev_matches_urls,
+            team_tag=current_match_data["team_a"]["tag"],
+            team_name=team_a_name,
         )
         team_a_agg_map_stats = aggregate_prev_match_map_stats(
-            team_a_prev_matches_urls, team_a_name
+            match_urls=team_a_prev_matches_urls, team_name=team_a_name
         )
         team_b_agg_player_stats = aggregate_prev_matches_player_stats(
-            team_b_prev_matches_urls, current_match_data["team_b"]["tag"]
+            original_match_url=match_url,
+            match_urls=team_b_prev_matches_urls,
+            team_tag=current_match_data["team_b"]["tag"],
+            team_name=team_b_name,
         )
         team_b_agg_map_stats = aggregate_prev_match_map_stats(
-            team_b_prev_matches_urls, team_b_name
+            match_urls=team_b_prev_matches_urls, team_name=team_b_name
         )
         team_a_h2h_agg_map_stats = aggregate_prev_match_map_stats(
-            prev_h2h_urls, team_a_name
+            match_urls=prev_h2h_urls, team_name=team_a_name
         )
         team_b_h2h_agg_map_stats = aggregate_prev_match_map_stats(
-            prev_h2h_urls, team_b_name
+            match_urls=prev_h2h_urls, team_name=team_b_name
         )
 
-        matchup_stats = create_teams_matchups_stats_df(
-            team_a_name,
-            team_b_name,
+        matchup_stats_df = create_teams_matchups_stats_df(
+            match_url,
             team_a_h2h_agg_map_stats,
             team_b_h2h_agg_map_stats,
             team_a_agg_map_stats,
             team_b_agg_map_stats,
         )
-        all_matchup_stats[f"{team_a_name}_vs_{team_b_name}"] = matchup_stats
 
-    create_teams_matchups_stats_csv(all_matchup_stats)
+        all_matchup_stats[match_url] = matchup_stats_df
+        all_players_stats.append(team_a_agg_player_stats)
+        all_players_stats.append(team_b_agg_player_stats)
+
+    all_players_stats_df = pd.concat(all_players_stats, axis=0)
+
+    combined_matchup_stats_df = pd.concat(all_matchup_stats.values()).reset_index()
+    repeat_count = len(combined_matchup_stats_df) // len(all_matchup_stats)
+
+    matchup_identifiers = []
+    for key in all_matchup_stats.keys():
+        matchup_identifiers.extend([key] * repeat_count)
+
+    combined_matchup_stats_df["Matchup"] = matchup_identifiers
+
+    combined_matchup_stats_df.to_csv(
+        "scraped_data/matches/teams_matchups_stats.csv", index=False
+    )
+    combined_matchup_stats_df.to_csv(
+        "scraped_data/players_stats/team_players_stats.csv", index=False
+    )
