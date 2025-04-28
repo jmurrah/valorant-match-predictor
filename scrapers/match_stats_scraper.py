@@ -217,14 +217,54 @@ def get_prev_n_h2h_match_urls(soup: BeautifulSoup, n: int = 3):
     return urls[:n]
 
 
-def aggregate_prev_match_map_stats():
-    pass
+def aggregate_prev_match_map_stats(match_urls: list[str], team_name: str):
+    total_map_wins = total_maps = total_round_wins = total_rounds = 0
+    for match_url in match_urls:
+        resp = requests.get(match_url, headers=HEADERS, timeout=15)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "html.parser")
+
+        match_data = parse_match(soup)
+
+        total_maps += len(match_data["maps_stats"])
+        total_map_wins += sum(
+            [
+                int(
+                    m["team_a_score"] > m["team_b_score"]
+                    if m["team_a_name"] == team_name
+                    else m["team_b_score"] > m["team_a_score"]
+                )
+                for m in match_data["maps_stats"]
+            ]
+        )
+        total_round_wins += sum(
+            [
+                (
+                    m["team_a_score"]
+                    if m["team_a_name"] == team_name
+                    else m["team_b_score"]
+                )
+                for m in match_data["maps_stats"]
+            ]
+        )
+        total_rounds += sum(
+            [(m["team_a_score"] + m["team_b_score"]) for m in match_data["maps_stats"]]
+        )
+
+    df = pd.DataFrame(
+        [
+            {
+                "Round Win %": total_round_wins / total_rounds,
+                "Map Win %": total_map_wins / total_maps,
+            }
+        ]
+    )
+    return df
 
 
 def aggregate_prev_matches_player_stats(
     match_urls: list[str], team_tag: str
 ) -> pd.DataFrame:
-    print(team_tag)
     player_stats = []
     for match_url in match_urls:
         resp = requests.get(match_url, headers=HEADERS, timeout=15)
@@ -270,7 +310,6 @@ def aggregate_prev_matches_player_stats(
         .to_frame()
         .T
     )
-    print(df)
     return df
 
 
@@ -300,7 +339,21 @@ if __name__ == "__main__":
         team_a_agg_player_stats = aggregate_prev_matches_player_stats(
             team_a_prev_matches_urls, current_match_data["team_a"]["tag"]
         )
+        team_a_agg_map_stats = aggregate_prev_match_map_stats(
+            team_a_prev_matches_urls, current_match_data["team_a"]["name"]
+        )
         team_b_agg_player_stats = aggregate_prev_matches_player_stats(
             team_b_prev_matches_urls, current_match_data["team_b"]["tag"]
         )
-        # h2h_agg_stats = aggregate_prev_matches(prev_h2h_urls)
+        team_b_agg_map_stats = aggregate_prev_match_map_stats(
+            team_b_prev_matches_urls, current_match_data["team_b"]["name"]
+        )
+        team_a_h2h_agg_map_stats = aggregate_prev_match_map_stats(
+            prev_h2h_urls, current_match_data["team_a"]["name"]
+        )
+        team_b_h2h_agg_map_stats = aggregate_prev_match_map_stats(
+            prev_h2h_urls, current_match_data["team_b"]["name"]
+        )
+
+        print(team_a_agg_player_stats)
+        print(team_a_agg_map_stats)
