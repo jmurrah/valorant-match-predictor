@@ -43,8 +43,11 @@ I like valorant!
     ```
     make model
     ```
+     ```
+    make scrape-odds
     ```
-    make scrape
+    ```
+    make scrape-matches
     ```
 
 ## Updating Dependencies
