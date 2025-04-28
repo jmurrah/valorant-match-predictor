@@ -180,6 +180,7 @@ def get_team_match_page(team_page: str):
 def get_prev_n_match_urls(
     original_match_url: str, team_page: str, excluded_team: str, n: int = 7
 ):
+    print(team_page)
     # NOTE: this will only work for matches that appear on the 1st page of the match history
     team_match_page = get_team_match_page(team_page)
 
@@ -254,8 +255,8 @@ def aggregate_prev_match_map_stats(match_urls: list[str], team_name: str):
     df = pd.DataFrame(
         [
             {
-                "Round Win %": total_round_wins / total_rounds,
-                "Map Win %": total_map_wins / total_maps,
+                "Round Win Pct": total_round_wins / total_rounds,
+                "Map Win Pct": total_map_wins / total_maps,
             }
         ]
     )
@@ -313,26 +314,71 @@ def aggregate_prev_matches_player_stats(
     return df
 
 
+# store the transformed data in a csv
+def create_teams_matchups_stats_df(
+    team_a,
+    team_b,
+    team_a_vs_b_stats,
+    team_b_vs_a_stats,
+    team_a_vs_others_stats,
+    team_b_vs_others_stats,
+):
+    return pd.DataFrame(
+        {
+            "Matchup": [f"{team_a}_vs_{team_b}"] * 4,
+            "Team": ["A", "A", "B", "B"],
+            "Opponent": ["B", "Others", "A", "Others"],
+            "Round Win Pct": [
+                team_a_vs_b_stats["Round Win Pct"].values[0],
+                team_a_vs_others_stats["Round Win Pct"].values[0],
+                team_b_vs_a_stats["Round Win Pct"].values[0],
+                team_b_vs_others_stats["Round Win Pct"].values[0],
+            ],
+            "Map Win Pct": [
+                team_a_vs_b_stats["Map Win Pct"].values[0],
+                team_a_vs_others_stats["Map Win Pct"].values[0],
+                team_b_vs_a_stats["Map Win Pct"].values[0],
+                team_b_vs_others_stats["Map Win Pct"].values[0],
+            ],
+        }
+    )
+
+
+def create_teams_matchups_stats_csv(all_matchup_stats: dict):
+    combined_df = pd.concat(all_matchup_stats.values()).reset_index()
+    repeat_count = len(combined_df) // len(all_matchup_stats)
+
+    matchup_identifiers = []
+    for key in all_matchup_stats.keys():
+        matchup_identifiers.extend([key] * repeat_count)
+
+    combined_df["Matchup"] = matchup_identifiers
+    print(combined_df)
+
+
 if __name__ == "__main__":
     set_display_options()
-
+    all_matchup_stats = {}
     for match_url in list(load_year_match_odds_from_csv("2024").keys())[:1]:
         match_url = "https://www.vlr.gg/371273/leviat-n-vs-kr-esports-champions-tour-2024-americas-stage-2-lbf"
         resp = requests.get(match_url, headers=HEADERS, timeout=15)
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, "html.parser")
 
-        # print(f"\n{match_url}")
+        print(f"\n{match_url}")
         current_match_data = parse_match(soup)
+        team_a_name = current_match_data["team_a"]["name"]
+        team_b_name = current_match_data["team_b"]["name"]
+
         team_a_prev_matches_urls = get_prev_n_match_urls(
             original_match_url=match_url,
             team_page=current_match_data["team_a"]["page"],
-            excluded_team=current_match_data["team_b"]["name"],
+            excluded_team=team_b_name,
         )
         team_b_prev_matches_urls = get_prev_n_match_urls(
             original_match_url=match_url,
             team_page=current_match_data["team_b"]["page"],
-            excluded_team=current_match_data["team_a"]["name"],
+            excluded_team=team_a_name,
         )
         prev_h2h_urls = get_prev_n_h2h_match_urls(soup, n=3)
 
@@ -340,20 +386,29 @@ if __name__ == "__main__":
             team_a_prev_matches_urls, current_match_data["team_a"]["tag"]
         )
         team_a_agg_map_stats = aggregate_prev_match_map_stats(
-            team_a_prev_matches_urls, current_match_data["team_a"]["name"]
+            team_a_prev_matches_urls, team_a_name
         )
         team_b_agg_player_stats = aggregate_prev_matches_player_stats(
             team_b_prev_matches_urls, current_match_data["team_b"]["tag"]
         )
         team_b_agg_map_stats = aggregate_prev_match_map_stats(
-            team_b_prev_matches_urls, current_match_data["team_b"]["name"]
+            team_b_prev_matches_urls, team_b_name
         )
         team_a_h2h_agg_map_stats = aggregate_prev_match_map_stats(
-            prev_h2h_urls, current_match_data["team_a"]["name"]
+            prev_h2h_urls, team_a_name
         )
         team_b_h2h_agg_map_stats = aggregate_prev_match_map_stats(
-            prev_h2h_urls, current_match_data["team_b"]["name"]
+            prev_h2h_urls, team_b_name
         )
 
-        print(team_a_agg_player_stats)
-        print(team_a_agg_map_stats)
+        matchup_stats = create_teams_matchups_stats_df(
+            team_a_name,
+            team_b_name,
+            team_a_h2h_agg_map_stats,
+            team_b_h2h_agg_map_stats,
+            team_a_agg_map_stats,
+            team_b_agg_map_stats,
+        )
+        all_matchup_stats[f"{team_a_name}_vs_{team_b_name}"] = matchup_stats
+
+    create_teams_matchups_stats_csv(all_matchup_stats)
