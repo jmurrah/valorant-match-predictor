@@ -131,17 +131,40 @@ def parse_match_maps(soup: BeautifulSoup):
     return [parse_map_header(h) for h in header_divs]
 
 
-def parse_match(soup: BeautifulSoup):
-    resp = requests.get(match_url, headers=HEADERS, timeout=15)
+def get_team_name_and_tag(team_page: str) -> tuple[str, str]:
+    resp = requests.get(team_page, headers=HEADERS, timeout=15)
     resp.raise_for_status()
     soup = BeautifulSoup(resp.text, "html.parser")
+    container = soup.find("div", class_="team-header-name")
 
+    team_name_tag = container.find("h1", class_="wf-title")
+    team_name = team_name_tag.get_text(strip=True)
+
+    team_tag_tag = container.find("h2", class_="wf-title team-header-tag")
+    if team_tag_tag:
+        team_tag = team_tag_tag.get_text(strip=True)
+    else:
+        team_tag = team_name
+
+    return team_name, team_tag
+
+
+def get_team_identifiers(soup: BeautifulSoup):
     team_a_page, team_b_page = extract_team_pages(soup)
+    team_a_name, team_a_tag = get_team_name_and_tag(team_a_page)
+    team_b_name, team_b_tag = get_team_name_and_tag(team_b_page)
+    team_a = {"name": team_a_name, "tag": team_a_tag, "page": team_a_page}
+    team_b = {"name": team_b_name, "tag": team_b_tag, "page": team_b_page}
+    return team_a, team_b
+
+
+def parse_match(soup: BeautifulSoup):
+    team_a, team_b = get_team_identifiers(soup)
     match_data = {
         "match_url": match_url,
         "match_date": parse_match_date(soup),
-        "team_a_page": team_a_page,
-        "team_b_page": team_b_page,
+        "team_a": team_a,
+        "team_b": team_b,
         "player_stats": get_player_stats(soup),
         "maps_data": parse_match_maps(soup),
     }
@@ -194,8 +217,21 @@ def get_prev_n_h2h_match_urls(soup: BeautifulSoup, n: int = 3):
     return urls[:n]
 
 
-def summarize_prev_matches(match_urls: list[str]):
+def aggregate_prev_match_map_stats():
     pass
+
+
+def aggregate_prev_matches_player_stats(match_urls: list[str], team_tag: str):
+    player_stats = []
+    for match_url in match_urls:
+        resp = requests.get(match_url, headers=HEADERS, timeout=15)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "html.parser")
+        match_data = parse_match(soup)
+        # player_stats.append(parse_match(soup)["player_stats"])
+
+    print(player_stats)
+    return player_stats
 
 
 if __name__ == "__main__":
@@ -207,24 +243,22 @@ if __name__ == "__main__":
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, "html.parser")
 
-        print(f"\n{match_url}")
+        # print(f"\n{match_url}")
         current_match_data = parse_match(soup)
-        team_a = current_match_data["maps_data"][0]["team_a_name"]
-        team_b = current_match_data["maps_data"][0]["team_b_name"]
         team_a_prev_matches_urls = get_prev_n_match_urls(
             original_match_url=match_url,
-            team_page=current_match_data["team_a_page"],
-            excluded_team=team_b,
+            team_page=current_match_data["team_a"]["page"],
+            excluded_team=current_match_data["team_b"]["name"],
         )
         team_b_prev_matches_urls = get_prev_n_match_urls(
             original_match_url=match_url,
-            team_page=current_match_data["team_b_page"],
-            excluded_team=team_a,
+            team_page=current_match_data["team_b"]["page"],
+            excluded_team=current_match_data["team_a"]["name"],
         )
-        last_h2h_urls = get_prev_n_h2h_match_urls(soup, n=3)
+        prev_h2h_urls = get_prev_n_h2h_match_urls(soup, n=3)
 
-        # for match_url in team_a_prev_matches:
-        #     match_data = parse_match(match_url)
-
-        # for match_url in team_b_prev_matches:
-        #     match_data = parse_match(match_url)
+        team_a_agg_player_stats = aggregate_prev_matches_player_stats(
+            team_a_prev_matches_urls, current_match_data["team_a"]["tag"]
+        )
+        # team_b_agg_stats = aggregate_prev_matches(team_b_prev_matches_urls)
+        # h2h_agg_stats = aggregate_prev_matches(prev_h2h_urls)

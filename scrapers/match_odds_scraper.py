@@ -10,7 +10,7 @@ import requests
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 
-from scrapers import HEADERS
+from scrapers import HEADERS, BASE_URL
 from helper import GLOBAL_TOURNAMENTS, REGIONAL_TOURNAMENTS
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -18,23 +18,17 @@ log = logging.getLogger(__name__)
 
 
 def get_tournament_match_urls(tournament_url: str) -> list[str]:
-    """Return every individual match URL inside a single VLR event."""
     pattern = re.compile(r"^/\d+/.+")
     html = requests.get(tournament_url, headers=HEADERS, timeout=20).text
     soup = BeautifulSoup(html, "html.parser")
-    links = {
-        urljoin("https://www.vlr.gg", a["href"])
-        for a in soup.find_all("a", href=pattern)
-    }
-    time.sleep(1)  # be polite
+    links = {urljoin(BASE_URL, a["href"]) for a in soup.find_all("a", href=pattern)}
+    time.sleep(1)
     return sorted(links)
 
 
 def get_yearly_match_urls(year: str) -> list[str]:
     """Return all regional-kickoff match URLs for the given VCT year."""
-    year_page = requests.get(
-        f"https://www.vlr.gg/vct-{year}", headers=HEADERS, timeout=20
-    )
+    year_page = requests.get(f"{BASE_URL}/vct-{year}", headers=HEADERS, timeout=20)
     soup = BeautifulSoup(year_page.content, "html.parser")
 
     tournament_cards = (
@@ -46,9 +40,7 @@ def get_yearly_match_urls(year: str) -> list[str]:
     yearly_match_urls: list[str] = []
     for card in tournament_cards:
         href = card.get("href")
-        tournament_matches_url = "https://www.vlr.gg" + href.replace(
-            "/event/", "/event/matches/"
-        )
+        tournament_matches_url = BASE_URL + href.replace("/event/", "/event/matches/")
         tournament = (
             card.find("div", class_="event-item-title").text.strip().split(": ")
         )
