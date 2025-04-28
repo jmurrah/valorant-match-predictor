@@ -166,7 +166,7 @@ def parse_match(soup: BeautifulSoup):
         "team_a": team_a,
         "team_b": team_b,
         "player_stats": get_player_stats(soup),
-        "maps_data": parse_match_maps(soup),
+        "maps_stats": parse_match_maps(soup),
     }
     return match_data
 
@@ -221,20 +221,57 @@ def aggregate_prev_match_map_stats():
     pass
 
 
-def aggregate_prev_matches_player_stats(match_urls: list[str], team_tag: str):
+def aggregate_prev_matches_player_stats(
+    match_urls: list[str], team_tag: str
+) -> pd.DataFrame:
     print(team_tag)
     player_stats = []
     for match_url in match_urls:
         resp = requests.get(match_url, headers=HEADERS, timeout=15)
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, "html.parser")
-        player_stats.append(parse_match(soup)["player_stats"])
+
+        match_data = parse_match(soup)
+        total_rounds = sum(
+            m["team_a_score"] + m["team_b_score"] for m in match_data["maps_stats"]
+        )
+
+        df = match_data["player_stats"]
+        team_row = df[df["team_tag"] == team_tag]
+        team_row = team_row.assign(
+            **{
+                "Rating": lambda d: d["Rating 2.0"],
+                "Kills:Deaths": lambda d: d["Kills"] / d["Deaths"],
+                "First Kills Per Round": lambda d: d["First Kills"] / total_rounds,
+                "First Deaths Per Round": lambda d: d["First Deaths"] / total_rounds,
+                "Kill, Assist, Trade, Survive %": lambda d: d[
+                    "Kill, Assist, Trade, Survive %"
+                ]
+                / 100,
+            }
+        )
+
+        player_stats.append(team_row)
 
     all_stats = pd.concat(player_stats, ignore_index=True)
     team_stats = all_stats[all_stats["team_tag"] == team_tag]
-    abc = team_stats.drop(columns="team_tag").mean()
-    print(abc)
-    return player_stats
+    agg_stats = team_stats.drop(columns="team_tag").mean()
+    df = (
+        agg_stats.loc[
+            [
+                "Rating",
+                "Average Combat Score",
+                "Kills:Deaths",
+                "Kill, Assist, Trade, Survive %",
+                "First Kills Per Round",
+                "First Deaths Per Round",
+            ]
+        ]
+        .to_frame()
+        .T
+    )
+    print(df)
+    return df
 
 
 if __name__ == "__main__":
@@ -263,5 +300,7 @@ if __name__ == "__main__":
         team_a_agg_player_stats = aggregate_prev_matches_player_stats(
             team_a_prev_matches_urls, current_match_data["team_a"]["tag"]
         )
-        # team_b_agg_stats = aggregate_prev_matches(team_b_prev_matches_urls)
+        team_b_agg_player_stats = aggregate_prev_matches_player_stats(
+            team_b_prev_matches_urls, current_match_data["team_b"]["tag"]
+        )
         # h2h_agg_stats = aggregate_prev_matches(prev_h2h_urls)
