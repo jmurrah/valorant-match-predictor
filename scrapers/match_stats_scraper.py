@@ -180,7 +180,6 @@ def get_team_match_page(team_page: str):
 def get_prev_n_match_urls(
     original_match_url: str, team_page: str, excluded_team: str, n: int = 7
 ):
-    print(team_page)
     # NOTE: this will only work for matches that appear on the 1st page of the match history
     team_match_page = get_team_match_page(team_page)
 
@@ -226,7 +225,7 @@ def aggregate_prev_match_map_stats(match_urls: list[str], team_name: str):
         soup = BeautifulSoup(resp.text, "html.parser")
 
         match_data = parse_match(soup)
-
+        print(match_url)
         total_maps += len(match_data["maps_stats"])
         total_map_wins += sum(
             [
@@ -251,12 +250,17 @@ def aggregate_prev_match_map_stats(match_urls: list[str], team_name: str):
         total_rounds += sum(
             [(m["team_a_score"] + m["team_b_score"]) for m in match_data["maps_stats"]]
         )
+    print(
+        f"rounds: {total_round_wins} / {total_rounds}\tmaps: {total_map_wins} / {total_maps}"
+    )
 
     df = pd.DataFrame(
         [
             {
-                "Round Win Pct": total_round_wins / total_rounds,
-                "Map Win Pct": total_map_wins / total_maps,
+                "Round Win Pct": (
+                    total_round_wins / total_rounds if total_rounds else 0.0
+                ),
+                "Map Win Pct": total_map_wins / total_maps if total_maps else 0.0,
             }
         ]
     )
@@ -345,27 +349,14 @@ def create_teams_matchups_stats_df(
     )
 
 
-def create_teams_matchups_stats_csv(all_matchup_stats: dict):
-    combined_df = pd.concat(all_matchup_stats.values()).reset_index()
-    repeat_count = len(combined_df) // len(all_matchup_stats)
-
-    matchup_identifiers = []
-    for key in all_matchup_stats.keys():
-        matchup_identifiers.extend([key] * repeat_count)
-
-    combined_df["Matchup"] = matchup_identifiers
-    print(combined_df)
-
-
-def create_players_stats_csv(all_players_stats: list):
-    print(all_players_stats)
-
-
 if __name__ == "__main__":
+    # NOTE: a lot of matches are scraped multiple times. need to clean this up...
     set_display_options()
     all_matchup_stats = {}
     all_players_stats = []
     for match_url in list(load_year_match_odds_from_csv("2024").keys()):
+        if "china" in match_url:
+            continue
         resp = requests.get(match_url, headers=HEADERS, timeout=15)
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, "html.parser")
