@@ -181,6 +181,7 @@ def get_prev_n_match_urls(
     original_match_url: str, team_page: str, excluded_team: str, n: int = 7
 ):
     # NOTE: this will only work for matches that appear on the 1st page of the match history
+    original = original_match_url.rstrip("/")
     team_match_page = get_team_match_page(team_page)
 
     resp = requests.get(team_match_page, headers=HEADERS)
@@ -192,15 +193,20 @@ def get_prev_n_match_urls(
 
     matches = []
     for a in rows:
-        new_match_url = urljoin(BASE_URL, a["href"].split("?")[0])
-        names = set([s.get_text(strip=True) for s in a.select("span.m-item-team-name")])
-        if new_match_url == original_match_url or (
-            excluded_team not in names
-            and any([t.lower() in new_match_url for t in REGIONAL_TOURNAMENTS])
+        # strip any query, join, and remove trailing slash
+        href = a["href"].split("?")[0]
+        new_match_url = urljoin(BASE_URL, href).rstrip("/")
+
+        names = {s.get_text(strip=True) for s in a.select("span.m-item-team-name")}
+        if new_match_url == original or (
+            excluded_team not in names and "americas" in new_match_url.lower()
         ):
             matches.append(new_match_url)
 
-    idx = matches.index(original_match_url)
+    if original not in matches or original == matches[-1]:
+        return None
+
+    idx = matches.index(original)
     return matches[idx + 1 : idx + 1 + n]
 
 
@@ -354,14 +360,13 @@ if __name__ == "__main__":
     set_display_options()
     all_matchup_stats = {}
     all_players_stats = []
-    for match_url in list(load_year_match_odds_from_csv("2024").keys()):
-        if "china" in match_url:
+    for i, match_url in enumerate(list(load_year_match_odds_from_csv("2024").keys())):
+        if "americas" not in match_url:
             continue
         resp = requests.get(match_url, headers=HEADERS, timeout=15)
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, "html.parser")
 
-        print(f"\n{match_url}")
         current_match_data = parse_match(soup)
         team_a_name = current_match_data["team_a"]["name"]
         team_b_name = current_match_data["team_b"]["name"]
@@ -377,6 +382,10 @@ if __name__ == "__main__":
             excluded_team=team_a_name,
         )
         prev_h2h_urls = get_prev_n_h2h_match_urls(soup, n=3)
+
+        if not team_a_prev_matches_urls or not team_b_prev_matches_urls:
+            print("skipping")
+            continue
 
         team_a_agg_player_stats = aggregate_prev_matches_player_stats(
             original_match_url=match_url,
