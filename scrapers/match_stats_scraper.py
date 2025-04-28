@@ -222,15 +222,18 @@ def aggregate_prev_match_map_stats():
 
 
 def aggregate_prev_matches_player_stats(match_urls: list[str], team_tag: str):
+    print(team_tag)
     player_stats = []
     for match_url in match_urls:
         resp = requests.get(match_url, headers=HEADERS, timeout=15)
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, "html.parser")
-        match_data = parse_match(soup)
-        # player_stats.append(parse_match(soup)["player_stats"])
+        player_stats.append(parse_match(soup)["player_stats"])
 
-    print(player_stats)
+    all_stats = pd.concat(player_stats, ignore_index=True)
+    team_stats = all_stats[all_stats["team_tag"] == team_tag]
+    abc = team_stats.drop(columns="team_tag").mean()
+    print(abc)
     return player_stats
 
 
