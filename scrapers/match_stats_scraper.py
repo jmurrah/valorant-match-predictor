@@ -392,6 +392,25 @@ def create_teams_matchups_stats_df(
     )
 
 
+def get_match_winner(map_stats: list[dict]):
+    # [
+    # {'map_name': 'Lotus', 'team_a_name': 'Sentinels', 'team_a_score': 13, 'team_b_name': 'NRG Esports', 'team_b_score': 8, 'picked_by': 'NRG Esports'},
+    # {'map_name': 'Sunset', 'team_a_name': 'Sentinels', 'team_a_score': 14, 'team_b_name': 'NRG Esports', 'team_b_score': 12, 'picked_by': 'Sentinels'}
+    # ]
+    team_a_map_wins = team_b_map_wins = 0
+    for m in map_stats:
+        if m["team_a_score"] > m["team_b_score"]:
+            team_a_map_wins += 1
+        else:
+            team_b_map_wins += 1
+
+    return (
+        map_stats[0]["team_a_name"]
+        if team_a_map_wins > team_b_map_wins
+        else map_stats[0]["team_b_name"]
+    )
+
+
 # https://www.vlr.gg/281026/kr-esports-vs-leviat-n-superdome-2023-colombia-ubsf
 # ⚠️ Skipping match (error scraping)
 # https://www.vlr.gg/280446/kr-esports-vs-leviat-n-argentina-game-show-cup-2023-showmatch
@@ -403,7 +422,6 @@ if __name__ == "__main__":
     for i, match_url in enumerate(
         list(load_year_thunderbird_match_odds_from_csv("2024").keys())[:2]
     ):
-        # match_url = "https://www.vlr.gg/280446/kr-esports-vs-leviat-n-argentina-game-show-cup-2023-showmatch"
         if "china" in match_url:
             continue
         resp = requests.get(match_url, headers=HEADERS, timeout=15)
@@ -472,6 +490,10 @@ if __name__ == "__main__":
             team_a_agg_map_stats,
             team_b_agg_map_stats,
         )
+
+        match_winner = get_match_winner(current_match_data["maps_stats"])
+        team_a_agg_player_stats.insert(2, "Won Match", match_winner)
+        team_b_agg_player_stats.insert(2, "Won Match", match_winner)
 
         all_matchup_stats[f"{team_a_name}_vs_{team_b_name}"] = matchup_stats_df
         all_players_stats.append(team_a_agg_player_stats)

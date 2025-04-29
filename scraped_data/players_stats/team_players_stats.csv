@@ -1,5 +1,5 @@
-Matchup URL,Teams,Rating,Average Combat Score,Kills:Deaths,"Kill, Assist, Trade, Survive %",First Kills Per Round,First Deaths Per Round
-https://www.vlr.gg/353177/mibr-vs-leviat-n-champions-tour-2024-americas-stage-2-w1,MIBR,0.8488571428571428,179.48571428571427,0.80184313071368,0.6442857142857142,0.08991821184503232,0.11008178815496769
-https://www.vlr.gg/353177/mibr-vs-leviat-n-champions-tour-2024-americas-stage-2-w1,LEVIATÁN,1.0751428571428572,205.79999999999998,1.154328599220028,0.7420000000000001,0.10854317984807278,0.09053420110430818
-https://www.vlr.gg/353178/sentinels-vs-nrg-esports-champions-tour-2024-americas-stage-2-w1,Sentinels,1.055,200.00000000000003,1.112563779640894,0.7436666666666666,0.10901148535294876,0.09043295909149568
-https://www.vlr.gg/353178/sentinels-vs-nrg-esports-champions-tour-2024-americas-stage-2-w1,NRG Esports,0.9917142857142858,199.6,1.046869038736387,0.7077142857142856,0.09724494153668352,0.10275505846331648
+Matchup URL,Teams,Won Match,Rating,Average Combat Score,Kills:Deaths,"Kill, Assist, Trade, Survive %",First Kills Per Round,First Deaths Per Round
+https://www.vlr.gg/353177/mibr-vs-leviat-n-champions-tour-2024-americas-stage-2-w1,MIBR,LEVIATÁN,0.8488571428571428,179.48571428571427,0.80184313071368,0.6442857142857142,0.08991821184503232,0.11008178815496769
+https://www.vlr.gg/353177/mibr-vs-leviat-n-champions-tour-2024-americas-stage-2-w1,LEVIATÁN,LEVIATÁN,1.0751428571428572,205.79999999999998,1.154328599220028,0.7420000000000001,0.10854317984807278,0.09053420110430818
+https://www.vlr.gg/353178/sentinels-vs-nrg-esports-champions-tour-2024-americas-stage-2-w1,Sentinels,Sentinels,1.055,200.00000000000003,1.112563779640894,0.7436666666666666,0.10901148535294876,0.09043295909149568
+https://www.vlr.gg/353178/sentinels-vs-nrg-esports-champions-tour-2024-americas-stage-2-w1,NRG Esports,Sentinels,0.9917142857142858,199.6,1.046869038736387,0.7077142857142856,0.09724494153668352,0.10275505846331648

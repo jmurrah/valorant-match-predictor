@@ -326,6 +326,32 @@ def match_decimal_odds(
     return {team_a: odd_a, team_b: odd_b}
 
 
+def compute_payouts_for_match(
+    matchup_url: str,
+    thunderbird_odds: dict[str, dict[str, float]],
+    model_odds: dict[str, float],
+    matchups_stats: pd.DataFrame,
+    winner: str,
+) -> dict[str, dict[str, float]]:
+    """
+    $1 bet on each side.
+    """
+
+    th_odds = thunderbird_odds[matchup_url]
+    th_payouts = {
+        team: (odds if team == winner else -1.0) for team, odds in th_odds.items()
+    }
+
+    model_payouts = {
+        team: (odds if team == winner else -1.0) for team, odds in model_odds.items()
+    }
+
+    return {
+        "Thunderbird": th_payouts,
+        "Model": model_payouts,
+    }
+
+
 def train(
     years: list[str],
 ) -> tuple[
@@ -354,14 +380,28 @@ def test(
     with torch.no_grad():
         prob_tensor = match_model(team_a_tensor, team_b_tensor).squeeze(1)
 
+    model_payout = thunderbird_payout = 0
     probs = prob_tensor.cpu().numpy()
     for matchup_url, p in zip(matchups_stats["Matchup URL"].unique(), probs):
         matchup_data = matchups_stats[matchups_stats["Matchup URL"] == matchup_url]
         team_a, team_b = matchup_data["Matchup"].iloc[0].split("_vs_")
         model_pred = match_decimal_odds(team_a, team_b, float(p))
-        print(f"\n{matchup_url}")
-        print(f"Thunderbird: {thunderbird_match_odds[matchup_url]}")
-        print(f"Our Model: {model_pred}")
+
+        winner = players_stats[players_stats["Matchup URL"] == matchup_url][
+            "Won Match"
+        ].iloc[0]
+
+        payouts = compute_payouts_for_match(
+            matchup_url, thunderbird_match_odds, model_pred, matchups_stats, winner
+        )
+
+        model_payout += payouts["Model"][winner]
+        thunderbird_payout += payouts["Thunderbird"][winner]
+
+    print("--- Results! ($1 bet per match) ---")
+    print(f"Thunderbird Payout: ${thunderbird_payout:.2f}")
+    print(f"Model Payout: ${model_payout:.2f}")
+    print(f"Expected Return If Bets Placed: ${(model_payout - thunderbird_payout):.2f}")
 
 
 if __name__ == "__main__":
