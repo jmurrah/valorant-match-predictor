@@ -316,6 +316,16 @@ def compute_odds(yearly_probabilities):
     return odds
 
 
+def match_decimal_odds(
+    team_a: str, team_b: str, prob_a: float, eps: float = 1e-6
+) -> tuple[float, float]:
+    prob_a = max(min(prob_a, 1 - eps), eps)
+
+    odd_a = round(1.0 / prob_a, 2)
+    odd_b = round(1.0 / (1.0 - prob_a), 2)
+    return {team_a: odd_a, team_b: odd_b}
+
+
 def train(
     years: list[str],
 ) -> tuple[
@@ -334,24 +344,24 @@ def test(
     match_model: Callable[[torch.Tensor], torch.Tensor],
     thunderbird_match_odds: dict[str, dict[str, float]] = None,
 ):
-    # 1. load the two CSVs into the exact same DataFrame shape your training loop expects
     players_stats = load_scraped_teams_players_stats_from_csv()
     matchups_stats = load_scraped_teams_matchups_stats_from_csv()
 
-    # 2. build the feature tensors (we ignore the ground‐truth win‐probs here)
-    team_a_tensor, team_b_tensor, win_probabilities = create_match_input_tensors(
+    team_a_tensor, team_b_tensor, _ = create_match_input_tensors(
         pr_model, players_stats, matchups_stats
     )
 
-    # 3. run your ensemble match predictor
     with torch.no_grad():
         prob_tensor = match_model(team_a_tensor, team_b_tensor).squeeze(1)
 
     probs = prob_tensor.cpu().numpy()
-
-    # 4. print a P(Team A wins) for each matchup
-    for matchup, p in zip(matchups_stats["Matchup URL"].unique(), probs):
-        print(f"{matchup}: P(Team A wins) = {p:.3f}")
+    for matchup_url, p in zip(matchups_stats["Matchup URL"].unique(), probs):
+        matchup_data = matchups_stats[matchups_stats["Matchup URL"] == matchup_url]
+        team_a, team_b = matchup_data["Matchup"].iloc[0].split("_vs_")
+        model_pred = match_decimal_odds(team_a, team_b, float(p))
+        print(f"\n{matchup_url}")
+        print(f"Thunderbird: {thunderbird_match_odds[matchup_url]}")
+        print(f"Our Model: {model_pred}")
 
 
 if __name__ == "__main__":
