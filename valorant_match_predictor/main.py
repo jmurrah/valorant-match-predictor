@@ -5,7 +5,7 @@ from sklearn.preprocessing import StandardScaler
 
 from typing import Callable
 
-from helper import load_year_match_odds_from_csv, set_display_options
+from helper import load_year_thunderbird_match_odds_from_csv, set_display_options
 
 from valorant_match_predictor import (
     DATAFRAME_BY_YEAR_TYPE,
@@ -25,7 +25,7 @@ def set_pandas_options() -> None:
 
 
 def display_features(
-    feature_names: list[str], tensor: torch.Tensor, team_name="Team"
+    feature_names: list[str], tensor: torch.Tensor, team_name="Teams"
 ) -> None:
     print(f"{team_name} features:")
     for i, (name, value) in enumerate(zip(feature_names, tensor)):
@@ -62,10 +62,10 @@ def create_match_input_tensors(
     players_stats: pd.DataFrame,
     matchups_data: pd.DataFrame,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    feature_names = [
-        "Head-to-Head Round Win %",
-        "Head-to-Head Map Win %",
-    ]
+    # feature_names = [
+    #     "Head-to-Head Round Win %",
+    #     "Head-to-Head Map Win %",
+    # ]
     team_a_features = []
     team_b_features = []
     win_probabilities = []
@@ -74,19 +74,19 @@ def create_match_input_tensors(
         matchup_data = matchups_data[matchups_data["Matchup"] == matchup]
         team_a, team_b = matchup.split("_vs_")
 
-        team_a_players_stats = players_stats[players_stats["Team"] == team_a]
-        team_b_players_stats = players_stats[players_stats["Team"] == team_b]
+        team_a_players_stats = players_stats[players_stats["Teams"] == team_a]
+        team_b_players_stats = players_stats[players_stats["Teams"] == team_b]
         team_a_vs_b_stats = matchup_data[
-            (matchup_data["Team"] == "A") & (matchup_data["Opponent"] == "B")
+            (matchup_data["Teams"] == "A") & (matchup_data["Opponent"] == "B")
         ]
         team_b_vs_a_stats = matchup_data[
-            (matchup_data["Team"] == "B") & (matchup_data["Opponent"] == "A")
+            (matchup_data["Teams"] == "B") & (matchup_data["Opponent"] == "A")
         ]
         team_a_vs_others_stats = matchup_data[
-            (matchup_data["Team"] == "A") & (matchup_data["Opponent"] == "Others")
+            (matchup_data["Teams"] == "A") & (matchup_data["Opponent"] == "Others")
         ]
         team_b_vs_others_stats = matchup_data[
-            (matchup_data["Team"] == "B") & (matchup_data["Opponent"] == "Others")
+            (matchup_data["Teams"] == "B") & (matchup_data["Opponent"] == "Others")
         ]
 
         team_a_pr_feature = create_team_pr_feature(
@@ -128,7 +128,7 @@ def create_match_input_tensors(
         win_probabilities, dtype=torch.float32
     ).unsqueeze(1)
 
-    return team_a_tensor, team_b_tensor, win_probabilities_tensor, feature_names
+    return team_a_tensor, team_b_tensor, win_probabilities_tensor
 
 
 def create_pr_input_tensor(
@@ -152,13 +152,13 @@ def create_pr_input_tensor(
         matchup_data = matchups_data[matchups_data["Matchup"] == matchup]
         team_a, team_b = matchup.split("_vs_")
 
-        team_a_players_stats = players_stats[players_stats["Team"] == team_a]
-        team_b_players_stats = players_stats[players_stats["Team"] == team_b]
+        team_a_players_stats = players_stats[players_stats["Teams"] == team_a]
+        team_b_players_stats = players_stats[players_stats["Teams"] == team_b]
         team_a_vs_others_stats = matchup_data[
-            (matchup_data["Team"] == "A") & (matchup_data["Opponent"] == "Others")
+            (matchup_data["Teams"] == "A") & (matchup_data["Opponent"] == "Others")
         ]
         team_b_vs_others_stats = matchup_data[
-            (matchup_data["Team"] == "B") & (matchup_data["Opponent"] == "Others")
+            (matchup_data["Teams"] == "B") & (matchup_data["Opponent"] == "Others")
         ]
 
         team_a_pr_features.append(
@@ -218,6 +218,8 @@ def get_power_rating_model(
         players_stats = year_data["players_stats"]["team_players_stats"]
         matchups_data = year_data["matches"]["teams_matchups_stats"]
 
+        # print(matchups_data.head(10))
+        # break
         team_pr_tensor, feature_names = create_pr_input_tensor(
             players_stats, matchups_data
         )
@@ -354,6 +356,6 @@ def test(
 if __name__ == "__main__":
     set_display_options()
     pr_model, match_model = train(years=["2022", "2023"])
-    thunderbird_match_odds = load_year_match_odds_from_csv("2024")
+    thunderbird_match_odds = load_year_thunderbird_match_odds_from_csv("2024")
     # print(thunderbird_match_odds)
     test(pr_model, match_model, thunderbird_match_odds)

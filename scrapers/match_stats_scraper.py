@@ -8,7 +8,7 @@ import pandas as pd
 
 from scrapers import HEADERS, BASE_URL
 from helper import (
-    load_year_match_odds_from_csv,
+    load_year_thunderbird_match_odds_from_csv,
     set_display_options,
     REGIONAL_TOURNAMENTS,
 )
@@ -363,6 +363,8 @@ def aggregate_prev_matches_player_stats(
 # store the transformed data in a csv
 def create_teams_matchups_stats_df(
     match_url,
+    team_a,
+    team_b,
     team_a_vs_b_stats,
     team_b_vs_a_stats,
     team_a_vs_others_stats,
@@ -370,8 +372,9 @@ def create_teams_matchups_stats_df(
 ):
     return pd.DataFrame(
         {
-            "Matchup": [match_url] * 4,
-            "Team": ["A", "A", "B", "B"],
+            "Match URL": [match_url] * 4,
+            "Matchup": [f"{team_a}_vs_{team_b}"] * 4,
+            "Teams": ["A", "A", "B", "B"],
             "Opponent": ["B", "Others", "A", "Others"],
             "Round Win Pct": [
                 team_a_vs_b_stats["Round Win Pct"].values[0],
@@ -397,9 +400,11 @@ if __name__ == "__main__":
     set_display_options()
     all_matchup_stats = {}
     all_players_stats = []
-    for i, match_url in enumerate(list(load_year_match_odds_from_csv("2024").keys())):
+    for i, match_url in enumerate(
+        list(load_year_thunderbird_match_odds_from_csv("2024").keys())
+    ):
         # match_url = "https://www.vlr.gg/280446/kr-esports-vs-leviat-n-argentina-game-show-cup-2023-showmatch"
-        if "americas" not in match_url:
+        if "china" in match_url:
             continue
         resp = requests.get(match_url, headers=HEADERS, timeout=15)
         resp.raise_for_status()
@@ -460,6 +465,8 @@ if __name__ == "__main__":
 
         matchup_stats_df = create_teams_matchups_stats_df(
             match_url,
+            team_a_name,
+            team_b_name,
             team_a_h2h_agg_map_stats,
             team_b_h2h_agg_map_stats,
             team_a_agg_map_stats,
