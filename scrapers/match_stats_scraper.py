@@ -1,4 +1,4 @@
-import re, requests
+import re, requests, time
 
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
@@ -12,6 +12,26 @@ from helper import (
     set_display_options,
     REGIONAL_TOURNAMENTS,
 )
+
+from requests.adapters import HTTPAdapter  # new
+from urllib3.util.retry import Retry  # new
+
+# create a Session that will retry on connect/read failures (including SSL handshake timeouts)
+session = requests.Session()  # new
+retry_strategy = Retry(  # new
+    total=3,  # total retry attempts
+    connect=3,  # retry on connection failures (e.g. handshake timeouts)
+    read=3,  # retry on read timeouts
+    backoff_factor=1,  # wait 1s, 2s, 4s between retries
+    status_forcelist=[429, 500, 502, 503, 504],  # retry on these HTTP status codes
+    allowed_methods=["HEAD", "GET", "OPTIONS"],
+)
+adapter = HTTPAdapter(max_retries=retry_strategy)  # new
+session.mount("https://", adapter)  # new
+session.mount("http://", adapter)  # new
+
+# Monkey-patch requests.get so all calls use our retrying session:
+requests.get = session.get  # new
 
 
 def parse_match_date(soup: BeautifulSoup):
@@ -160,13 +180,21 @@ def get_team_identifiers(soup: BeautifulSoup):
 
 def parse_match(soup: BeautifulSoup):
     team_a, team_b = get_team_identifiers(soup)
+    try:
+        match_date = parse_match_date(soup)
+        player_stats = get_player_stats(soup)
+        map_stats = parse_match_maps(soup)
+    except AttributeError:
+        print(f"⚠️ Skipping match (error scraping)")
+        return None
+
     match_data = {
         "match_url": match_url,
-        "match_date": parse_match_date(soup),
+        "match_date": match_date,
         "team_a": team_a,
         "team_b": team_b,
-        "player_stats": get_player_stats(soup),
-        "maps_stats": parse_match_maps(soup),
+        "player_stats": player_stats,
+        "maps_stats": map_stats,
     }
     return match_data
 
@@ -184,8 +212,18 @@ def get_prev_n_match_urls(
     original = original_match_url.rstrip("/")
     team_match_page = get_team_match_page(team_page)
 
-    resp = requests.get(team_match_page, headers=HEADERS)
-    resp.raise_for_status()
+    # simple retry loop around the requests.get
+    for attempt in range(3):
+        try:
+            resp = requests.get(team_match_page, headers=HEADERS, timeout=15)
+            resp.raise_for_status()
+            break
+        except (requests.exceptions.ReadTimeout, requests.exceptions.ConnectionError):
+            if attempt < 2:
+                time.sleep(1)
+            else:
+                raise
+
     soup = BeautifulSoup(resp.text, "html.parser")
 
     container = soup.find("div", class_="mod-dark")
@@ -193,7 +231,6 @@ def get_prev_n_match_urls(
 
     matches = []
     for a in rows:
-        # strip any query, join, and remove trailing slash
         href = a["href"].split("?")[0]
         new_match_url = urljoin(BASE_URL, href).rstrip("/")
 
@@ -230,47 +267,44 @@ def aggregate_prev_match_map_stats(match_urls: list[str], team_name: str):
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, "html.parser")
 
+        # skip any match that failed to parse
         match_data = parse_match(soup)
+        if match_data is None:
+            print(f"⚠️ Skipping map stats for {match_url}")
+            continue
+
         print(match_url)
         total_maps += len(match_data["maps_stats"])
         total_map_wins += sum(
-            [
-                int(
-                    m["team_a_score"] > m["team_b_score"]
-                    if m["team_a_name"] == team_name
-                    else m["team_b_score"] > m["team_a_score"]
-                )
-                for m in match_data["maps_stats"]
-            ]
+            int(
+                m["team_a_score"] > m["team_b_score"]
+                if m["team_a_name"] == team_name
+                else m["team_b_score"] > m["team_a_score"]
+            )
+            for m in match_data["maps_stats"]
         )
         total_round_wins += sum(
-            [
-                (
-                    m["team_a_score"]
-                    if m["team_a_name"] == team_name
-                    else m["team_b_score"]
-                )
-                for m in match_data["maps_stats"]
-            ]
+            m["team_a_score"] if m["team_a_name"] == team_name else m["team_b_score"]
+            for m in match_data["maps_stats"]
         )
         total_rounds += sum(
-            [(m["team_a_score"] + m["team_b_score"]) for m in match_data["maps_stats"]]
+            m["team_a_score"] + m["team_b_score"] for m in match_data["maps_stats"]
         )
+
     print(
         f"rounds: {total_round_wins} / {total_rounds}\tmaps: {total_map_wins} / {total_maps}"
     )
 
-    df = pd.DataFrame(
+    return pd.DataFrame(
         [
             {
                 "Round Win Pct": (
-                    total_round_wins / total_rounds if total_rounds else 0.0
+                    total_round_wins / total_rounds if total_rounds else 0.5
                 ),
-                "Map Win Pct": total_map_wins / total_maps if total_maps else 0.0,
+                "Map Win Pct": total_map_wins / total_maps if total_maps else 0.5,
             }
         ]
     )
-    return df
 
 
 def aggregate_prev_matches_player_stats(
@@ -355,12 +389,16 @@ def create_teams_matchups_stats_df(
     )
 
 
+# https://www.vlr.gg/281026/kr-esports-vs-leviat-n-superdome-2023-colombia-ubsf
+# ⚠️ Skipping match (error scraping)
+# https://www.vlr.gg/280446/kr-esports-vs-leviat-n-argentina-game-show-cup-2023-showmatch
 if __name__ == "__main__":
     # NOTE: a lot of matches are scraped multiple times. need to clean this up...
     set_display_options()
     all_matchup_stats = {}
     all_players_stats = []
     for i, match_url in enumerate(list(load_year_match_odds_from_csv("2024").keys())):
+        # match_url = "https://www.vlr.gg/280446/kr-esports-vs-leviat-n-argentina-game-show-cup-2023-showmatch"
         if "americas" not in match_url:
             continue
         resp = requests.get(match_url, headers=HEADERS, timeout=15)
@@ -368,6 +406,9 @@ if __name__ == "__main__":
         soup = BeautifulSoup(resp.text, "html.parser")
 
         current_match_data = parse_match(soup)
+        if not current_match_data:
+            print("skipping")
+            continue
         team_a_name = current_match_data["team_a"]["name"]
         team_b_name = current_match_data["team_b"]["name"]
 
@@ -387,14 +428,21 @@ if __name__ == "__main__":
             print("skipping")
             continue
 
+        team_a_agg_map_stats = aggregate_prev_match_map_stats(
+            match_urls=team_a_prev_matches_urls, team_name=team_a_name
+        )
+        team_b_agg_map_stats = aggregate_prev_match_map_stats(
+            match_urls=team_b_prev_matches_urls, team_name=team_b_name
+        )
+        if team_a_agg_map_stats.empty or team_b_agg_map_stats.empty:
+            print("skipping")
+            continue
+
         team_a_agg_player_stats = aggregate_prev_matches_player_stats(
             original_match_url=match_url,
             match_urls=team_a_prev_matches_urls,
             team_tag=current_match_data["team_a"]["tag"],
             team_name=team_a_name,
-        )
-        team_a_agg_map_stats = aggregate_prev_match_map_stats(
-            match_urls=team_a_prev_matches_urls, team_name=team_a_name
         )
         team_b_agg_player_stats = aggregate_prev_matches_player_stats(
             original_match_url=match_url,
@@ -402,9 +450,7 @@ if __name__ == "__main__":
             team_tag=current_match_data["team_b"]["tag"],
             team_name=team_b_name,
         )
-        team_b_agg_map_stats = aggregate_prev_match_map_stats(
-            match_urls=team_b_prev_matches_urls, team_name=team_b_name
-        )
+
         team_a_h2h_agg_map_stats = aggregate_prev_match_map_stats(
             match_urls=prev_h2h_urls, team_name=team_a_name
         )
