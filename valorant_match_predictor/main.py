@@ -5,7 +5,12 @@ from sklearn.preprocessing import StandardScaler
 
 from typing import Callable
 
-from helper import load_year_thunderbird_match_odds_from_csv, set_display_options
+from helper import (
+    load_year_thunderbird_match_odds_from_csv,
+    set_display_options,
+    load_scraped_teams_matchups_stats_from_csv,
+    load_scraped_teams_players_stats_from_csv,
+)
 
 from valorant_match_predictor import (
     DATAFRAME_BY_YEAR_TYPE,
@@ -325,37 +330,37 @@ def test(
 ):
     # dataframes_by_year = read_in_data("data", years)
     # transformed_data = transform_data(dataframes_by_year)
+    test_player_stats = load_scraped_teams_players_stats_from_csv()
+    test_matchup_stats = load_scraped_teams_matchups_stats_from_csv()
 
     pred_match_probs = []
+    # test_matchup_urls = set([row["Matchup"] for _, row in test_player_stats.iterrows()])
 
-    for match_url, odds in thunderbird_match_odds.items():
-        print(match_url)
-        print(odds)
-        print()
-        # get the recent player stats before this game (likely through web scraping)
-        # get recent matchup stats
+    # get the recent player stats before this game (likely through web scraping)
+    # get recent matchup stats
 
-        # players_stats = year_data["players_stats"]["team_players_stats"]
-        # matchups_data = year_data["matches"]["teams_matchups_stats"]
+    # players_stats = year_data["players_stats"]["team_players_stats"]
+    # matchups_data = year_data["matches"]["teams_matchups_stats"]
 
-        # team_a_tensor, team_b_tensor, win_probabilities, _ = create_match_input_tensors(
-        #     pr_model, players_stats, matchups_data
-        # )
+    team_a_tensor, team_b_tensor, win_probabilities, _ = create_match_input_tensors(
+        pr_model, test_player_stats, test_matchup_stats
+    )
 
-        # team_a_mask = ~(torch.isnan(team_a_tensor).any(dim=1))
-        # team_b_mask = ~(torch.isnan(team_b_tensor).any(dim=1))
-        # team_a_tensor = team_a_tensor[team_a_mask]
-        # team_b_tensor = team_b_tensor[team_b_mask]
+    team_a_mask = ~(torch.isnan(team_a_tensor).any(dim=1))
+    team_b_mask = ~(torch.isnan(team_b_tensor).any(dim=1))
+    team_a_tensor = team_a_tensor[team_a_mask]
+    team_b_tensor = team_b_tensor[team_b_mask]
 
-        # probabilities = match_model(team_a_tensor, team_b_tensor)
-        # pred_match_probs.append(probabilities)
+    probabilities = match_model(team_a_tensor, team_b_tensor)
+    # pred_match_probs.append(probabilities)
 
-        # predicted_odds = compute_odds(pred_match_probs)
+    # predicted_odds = compute_odds(pred_match_probs)
 
 
 if __name__ == "__main__":
-    set_display_options()
-    pr_model, match_model = train(years=["2022", "2023"])
+    # set_display_options()
+    # pr_model, match_model = train(years=["2022", "2023"])
     thunderbird_match_odds = load_year_thunderbird_match_odds_from_csv("2024")
     # print(thunderbird_match_odds)
-    test(pr_model, match_model, thunderbird_match_odds)
+    # test(pr_model, match_model, thunderbird_match_odds)
+    test()

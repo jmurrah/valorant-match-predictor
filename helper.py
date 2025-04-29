@@ -32,7 +32,7 @@ def load_scraped_teams_matchups_stats_from_csv():
 
 
 def load_scraped_teams_players_stats_from_csv():
-    return pd.read_csv(Path("scraped_data/matches/team_players_stats.csv"))
+    return pd.read_csv(Path("scraped_data/players_stats/team_players_stats.csv"))
 
 
 def set_display_options():
