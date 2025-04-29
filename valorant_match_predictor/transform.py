@@ -21,7 +21,7 @@ def filter_out_non_regional_tournaments(dataframe: pd.DataFrame) -> pd.DataFrame
 
 def transform_players_stats(players_stats_df: pd.DataFrame) -> pd.DataFrame:
     USEFUL_PLAYER_COLUMNS = [
-        "Team",
+        "Teams",
         "Rating",
         "Average Combat Score",
         "Kills:Deaths",
@@ -118,7 +118,7 @@ def get_matchup_stats(
     return pd.DataFrame(
         {
             "Matchup": [f"{team_a}_vs_{team_b}"] * 4,
-            "Team": ["A", "A", "B", "B"],
+            "Teams": ["A", "A", "B", "B"],
             "Opponent": ["B", "Others", "A", "Others"],
             "Total Maps": [
                 team_a_vs_b_stats["Total Maps"].values[0],
@@ -233,14 +233,14 @@ def transform_data(
 
     for year in dataframes_by_year:
         print(f"Transforming data for {year}!")
-        transformed_dataframes_by_year[year]["players_stats"]["team_players_stats"] = (
-            transform_players_stats(
-                dataframes_by_year[year]["players_stats"]["players_stats"]
-            )
+        transformed_dataframes_by_year[year]["players_stats"][
+            "team_players_stats"
+        ] = transform_players_stats(
+            dataframes_by_year[year]["players_stats"]["players_stats"]
         )
-        transformed_dataframes_by_year[year]["matches"]["teams_matchups_stats"] = (
-            transform_maps_scores(dataframes_by_year[year]["matches"]["maps_scores"])
-        )
+        transformed_dataframes_by_year[year]["matches"][
+            "teams_matchups_stats"
+        ] = transform_maps_scores(dataframes_by_year[year]["matches"]["maps_scores"])
 
     return transformed_dataframes_by_year
 

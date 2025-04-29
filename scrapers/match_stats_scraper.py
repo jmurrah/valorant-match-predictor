@@ -8,7 +8,7 @@ import pandas as pd
 
 from scrapers import HEADERS, BASE_URL
 from helper import (
-    load_year_match_odds_from_csv,
+    load_year_thunderbird_match_odds_from_csv,
     set_display_options,
     REGIONAL_TOURNAMENTS,
 )
@@ -236,7 +236,7 @@ def get_prev_n_match_urls(
 
         names = {s.get_text(strip=True) for s in a.select("span.m-item-team-name")}
         if new_match_url == original or (
-            excluded_team not in names and "americas" in new_match_url.lower()
+            excluded_team not in names and "china" not in new_match_url.lower()
         ):
             matches.append(new_match_url)
 
@@ -355,14 +355,16 @@ def aggregate_prev_matches_player_stats(
         .to_frame()
         .T
     )
-    df.insert(0, "Matchup", original_match_url)
-    df.insert(1, "Team Name", team_name)
+    df.insert(0, "Matchup URL", original_match_url)
+    df.insert(1, "Teams", team_name)
     return df
 
 
 # store the transformed data in a csv
 def create_teams_matchups_stats_df(
     match_url,
+    team_a,
+    team_b,
     team_a_vs_b_stats,
     team_b_vs_a_stats,
     team_a_vs_others_stats,
@@ -370,8 +372,9 @@ def create_teams_matchups_stats_df(
 ):
     return pd.DataFrame(
         {
-            "Matchup": [match_url] * 4,
-            "Team": ["A", "A", "B", "B"],
+            "Matchup URL": [match_url] * 4,
+            "Matchup": [f"{team_a}_vs_{team_b}"] * 4,
+            "Teams": ["A", "A", "B", "B"],
             "Opponent": ["B", "Others", "A", "Others"],
             "Round Win Pct": [
                 team_a_vs_b_stats["Round Win Pct"].values[0],
@@ -389,6 +392,25 @@ def create_teams_matchups_stats_df(
     )
 
 
+def get_match_winner(map_stats: list[dict]):
+    # [
+    # {'map_name': 'Lotus', 'team_a_name': 'Sentinels', 'team_a_score': 13, 'team_b_name': 'NRG Esports', 'team_b_score': 8, 'picked_by': 'NRG Esports'},
+    # {'map_name': 'Sunset', 'team_a_name': 'Sentinels', 'team_a_score': 14, 'team_b_name': 'NRG Esports', 'team_b_score': 12, 'picked_by': 'Sentinels'}
+    # ]
+    team_a_map_wins = team_b_map_wins = 0
+    for m in map_stats:
+        if m["team_a_score"] > m["team_b_score"]:
+            team_a_map_wins += 1
+        else:
+            team_b_map_wins += 1
+
+    return (
+        map_stats[0]["team_a_name"]
+        if team_a_map_wins > team_b_map_wins
+        else map_stats[0]["team_b_name"]
+    )
+
+
 # https://www.vlr.gg/281026/kr-esports-vs-leviat-n-superdome-2023-colombia-ubsf
 # ⚠️ Skipping match (error scraping)
 # https://www.vlr.gg/280446/kr-esports-vs-leviat-n-argentina-game-show-cup-2023-showmatch
@@ -397,9 +419,10 @@ if __name__ == "__main__":
     set_display_options()
     all_matchup_stats = {}
     all_players_stats = []
-    for i, match_url in enumerate(list(load_year_match_odds_from_csv("2024").keys())):
-        # match_url = "https://www.vlr.gg/280446/kr-esports-vs-leviat-n-argentina-game-show-cup-2023-showmatch"
-        if "americas" not in match_url:
+    for i, match_url in enumerate(
+        list(load_year_thunderbird_match_odds_from_csv("2024").keys())
+    ):
+        if "china" in match_url:
             continue
         resp = requests.get(match_url, headers=HEADERS, timeout=15)
         resp.raise_for_status()
@@ -460,13 +483,19 @@ if __name__ == "__main__":
 
         matchup_stats_df = create_teams_matchups_stats_df(
             match_url,
+            team_a_name,
+            team_b_name,
             team_a_h2h_agg_map_stats,
             team_b_h2h_agg_map_stats,
             team_a_agg_map_stats,
             team_b_agg_map_stats,
         )
 
-        all_matchup_stats[match_url] = matchup_stats_df
+        match_winner = get_match_winner(current_match_data["maps_stats"])
+        team_a_agg_player_stats.insert(2, "Won Match", match_winner)
+        team_b_agg_player_stats.insert(2, "Won Match", match_winner)
+
+        all_matchup_stats[f"{team_a_name}_vs_{team_b_name}"] = matchup_stats_df
         all_players_stats.append(team_a_agg_player_stats)
         all_players_stats.append(team_b_agg_player_stats)
 

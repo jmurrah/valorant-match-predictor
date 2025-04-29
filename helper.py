@@ -9,7 +9,7 @@ GLOBAL_TOURNAMENTS = ["Masters", "Valorant Champions"]
 REGIONAL_TOURNAMENTS = ["Americas", "EMEA", "Pacific", "China"]
 
 
-def load_year_match_odds_from_csv(year: str) -> dict[str, dict[str, float]]:
+def load_year_thunderbird_match_odds_from_csv(year: str) -> dict[str, dict[str, float]]:
     in_file = (
         Path("scraped_data/thunderbird_match_odds")
         / f"{year}_thunderbird_match_odds.csv"
@@ -25,6 +25,14 @@ def load_year_match_odds_from_csv(year: str) -> dict[str, dict[str, float]]:
             match_odds[match_url] = {team_a: odd_a, team_b: odd_b}
 
     return match_odds
+
+
+def load_scraped_teams_matchups_stats_from_csv():
+    return pd.read_csv(Path("scraped_data/matches/teams_matchups_stats.csv"))
+
+
+def load_scraped_teams_players_stats_from_csv():
+    return pd.read_csv(Path("scraped_data/players_stats/team_players_stats.csv"))
 
 
 def set_display_options():
