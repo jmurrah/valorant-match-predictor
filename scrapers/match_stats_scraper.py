@@ -1,4 +1,4 @@
-import re, requests
+import re, requests, time
 
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
@@ -12,6 +12,26 @@ from helper import (
     set_display_options,
     REGIONAL_TOURNAMENTS,
 )
+
+from requests.adapters import HTTPAdapter  # new
+from urllib3.util.retry import Retry  # new
+
+# create a Session that will retry on connect/read failures (including SSL handshake timeouts)
+session = requests.Session()  # new
+retry_strategy = Retry(  # new
+    total=3,  # total retry attempts
+    connect=3,  # retry on connection failures (e.g. handshake timeouts)
+    read=3,  # retry on read timeouts
+    backoff_factor=1,  # wait 1s, 2s, 4s between retries
+    status_forcelist=[429, 500, 502, 503, 504],  # retry on these HTTP status codes
+    allowed_methods=["HEAD", "GET", "OPTIONS"],
+)
+adapter = HTTPAdapter(max_retries=retry_strategy)  # new
+session.mount("https://", adapter)  # new
+session.mount("http://", adapter)  # new
+
+# Monkey-patch requests.get so all calls use our retrying session:
+requests.get = session.get  # new
 
 
 def parse_match_date(soup: BeautifulSoup):
@@ -160,13 +180,21 @@ def get_team_identifiers(soup: BeautifulSoup):
 
 def parse_match(soup: BeautifulSoup):
     team_a, team_b = get_team_identifiers(soup)
+    try:
+        match_date = parse_match_date(soup)
+        player_stats = get_player_stats(soup)
+        map_stats = parse_match_maps(soup)
+    except AttributeError:
+        print(f"⚠️ Skipping match (error scraping)")
+        return None
+
     match_data = {
         "match_url": match_url,
-        "match_date": parse_match_date(soup),
+        "match_date": match_date,
         "team_a": team_a,
         "team_b": team_b,
-        "player_stats": get_player_stats(soup),
-        "maps_stats": parse_match_maps(soup),
+        "player_stats": player_stats,
+        "maps_stats": map_stats,
     }
     return match_data
 
@@ -181,10 +209,21 @@ def get_prev_n_match_urls(
     original_match_url: str, team_page: str, excluded_team: str, n: int = 7
 ):
     # NOTE: this will only work for matches that appear on the 1st page of the match history
+    original = original_match_url.rstrip("/")
     team_match_page = get_team_match_page(team_page)
 
-    resp = requests.get(team_match_page, headers=HEADERS)
-    resp.raise_for_status()
+    # simple retry loop around the requests.get
+    for attempt in range(3):
+        try:
+            resp = requests.get(team_match_page, headers=HEADERS, timeout=15)
+            resp.raise_for_status()
+            break
+        except (requests.exceptions.ReadTimeout, requests.exceptions.ConnectionError):
+            if attempt < 2:
+                time.sleep(1)
+            else:
+                raise
+
     soup = BeautifulSoup(resp.text, "html.parser")
 
     container = soup.find("div", class_="mod-dark")
@@ -192,15 +231,19 @@ def get_prev_n_match_urls(
 
     matches = []
     for a in rows:
-        new_match_url = urljoin(BASE_URL, a["href"].split("?")[0])
-        names = set([s.get_text(strip=True) for s in a.select("span.m-item-team-name")])
-        if new_match_url == original_match_url or (
-            excluded_team not in names
-            and any([t.lower() in new_match_url for t in REGIONAL_TOURNAMENTS])
+        href = a["href"].split("?")[0]
+        new_match_url = urljoin(BASE_URL, href).rstrip("/")
+
+        names = {s.get_text(strip=True) for s in a.select("span.m-item-team-name")}
+        if new_match_url == original or (
+            excluded_team not in names and "americas" in new_match_url.lower()
         ):
             matches.append(new_match_url)
 
-    idx = matches.index(original_match_url)
+    if original not in matches or original == matches[-1]:
+        return None
+
+    idx = matches.index(original)
     return matches[idx + 1 : idx + 1 + n]
 
 
@@ -224,46 +267,48 @@ def aggregate_prev_match_map_stats(match_urls: list[str], team_name: str):
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, "html.parser")
 
+        # skip any match that failed to parse
         match_data = parse_match(soup)
+        if match_data is None:
+            print(f"⚠️ Skipping map stats for {match_url}")
+            continue
 
+        print(match_url)
         total_maps += len(match_data["maps_stats"])
         total_map_wins += sum(
-            [
-                int(
-                    m["team_a_score"] > m["team_b_score"]
-                    if m["team_a_name"] == team_name
-                    else m["team_b_score"] > m["team_a_score"]
-                )
-                for m in match_data["maps_stats"]
-            ]
+            int(
+                m["team_a_score"] > m["team_b_score"]
+                if m["team_a_name"] == team_name
+                else m["team_b_score"] > m["team_a_score"]
+            )
+            for m in match_data["maps_stats"]
         )
         total_round_wins += sum(
-            [
-                (
-                    m["team_a_score"]
-                    if m["team_a_name"] == team_name
-                    else m["team_b_score"]
-                )
-                for m in match_data["maps_stats"]
-            ]
+            m["team_a_score"] if m["team_a_name"] == team_name else m["team_b_score"]
+            for m in match_data["maps_stats"]
         )
         total_rounds += sum(
-            [(m["team_a_score"] + m["team_b_score"]) for m in match_data["maps_stats"]]
+            m["team_a_score"] + m["team_b_score"] for m in match_data["maps_stats"]
         )
 
-    df = pd.DataFrame(
+    print(
+        f"rounds: {total_round_wins} / {total_rounds}\tmaps: {total_map_wins} / {total_maps}"
+    )
+
+    return pd.DataFrame(
         [
             {
-                "Round Win %": total_round_wins / total_rounds,
-                "Map Win %": total_map_wins / total_maps,
+                "Round Win Pct": (
+                    total_round_wins / total_rounds if total_rounds else 0.5
+                ),
+                "Map Win Pct": total_map_wins / total_maps if total_maps else 0.5,
             }
         ]
     )
-    return df
 
 
 def aggregate_prev_matches_player_stats(
-    match_urls: list[str], team_tag: str
+    original_match_url: str, match_urls: list[str], team_tag: str, team_name: str
 ) -> pd.DataFrame:
     player_stats = []
     for match_url in match_urls:
@@ -310,50 +355,135 @@ def aggregate_prev_matches_player_stats(
         .to_frame()
         .T
     )
+    df.insert(0, "Matchup", original_match_url)
+    df.insert(1, "Team Name", team_name)
     return df
 
 
-if __name__ == "__main__":
-    set_display_options()
+# store the transformed data in a csv
+def create_teams_matchups_stats_df(
+    match_url,
+    team_a_vs_b_stats,
+    team_b_vs_a_stats,
+    team_a_vs_others_stats,
+    team_b_vs_others_stats,
+):
+    return pd.DataFrame(
+        {
+            "Matchup": [match_url] * 4,
+            "Team": ["A", "A", "B", "B"],
+            "Opponent": ["B", "Others", "A", "Others"],
+            "Round Win Pct": [
+                team_a_vs_b_stats["Round Win Pct"].values[0],
+                team_a_vs_others_stats["Round Win Pct"].values[0],
+                team_b_vs_a_stats["Round Win Pct"].values[0],
+                team_b_vs_others_stats["Round Win Pct"].values[0],
+            ],
+            "Map Win Pct": [
+                team_a_vs_b_stats["Map Win Pct"].values[0],
+                team_a_vs_others_stats["Map Win Pct"].values[0],
+                team_b_vs_a_stats["Map Win Pct"].values[0],
+                team_b_vs_others_stats["Map Win Pct"].values[0],
+            ],
+        }
+    )
 
-    for match_url in list(load_year_match_odds_from_csv("2024").keys())[:1]:
-        match_url = "https://www.vlr.gg/371273/leviat-n-vs-kr-esports-champions-tour-2024-americas-stage-2-lbf"
+
+# https://www.vlr.gg/281026/kr-esports-vs-leviat-n-superdome-2023-colombia-ubsf
+# ⚠️ Skipping match (error scraping)
+# https://www.vlr.gg/280446/kr-esports-vs-leviat-n-argentina-game-show-cup-2023-showmatch
+if __name__ == "__main__":
+    # NOTE: a lot of matches are scraped multiple times. need to clean this up...
+    set_display_options()
+    all_matchup_stats = {}
+    all_players_stats = []
+    for i, match_url in enumerate(list(load_year_match_odds_from_csv("2024").keys())):
+        # match_url = "https://www.vlr.gg/280446/kr-esports-vs-leviat-n-argentina-game-show-cup-2023-showmatch"
+        if "americas" not in match_url:
+            continue
         resp = requests.get(match_url, headers=HEADERS, timeout=15)
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, "html.parser")
 
-        # print(f"\n{match_url}")
         current_match_data = parse_match(soup)
+        if not current_match_data:
+            print("skipping")
+            continue
+        team_a_name = current_match_data["team_a"]["name"]
+        team_b_name = current_match_data["team_b"]["name"]
+
         team_a_prev_matches_urls = get_prev_n_match_urls(
             original_match_url=match_url,
             team_page=current_match_data["team_a"]["page"],
-            excluded_team=current_match_data["team_b"]["name"],
+            excluded_team=team_b_name,
         )
         team_b_prev_matches_urls = get_prev_n_match_urls(
             original_match_url=match_url,
             team_page=current_match_data["team_b"]["page"],
-            excluded_team=current_match_data["team_a"]["name"],
+            excluded_team=team_a_name,
         )
         prev_h2h_urls = get_prev_n_h2h_match_urls(soup, n=3)
 
-        team_a_agg_player_stats = aggregate_prev_matches_player_stats(
-            team_a_prev_matches_urls, current_match_data["team_a"]["tag"]
-        )
+        if not team_a_prev_matches_urls or not team_b_prev_matches_urls:
+            print("skipping")
+            continue
+
         team_a_agg_map_stats = aggregate_prev_match_map_stats(
-            team_a_prev_matches_urls, current_match_data["team_a"]["name"]
-        )
-        team_b_agg_player_stats = aggregate_prev_matches_player_stats(
-            team_b_prev_matches_urls, current_match_data["team_b"]["tag"]
+            match_urls=team_a_prev_matches_urls, team_name=team_a_name
         )
         team_b_agg_map_stats = aggregate_prev_match_map_stats(
-            team_b_prev_matches_urls, current_match_data["team_b"]["name"]
+            match_urls=team_b_prev_matches_urls, team_name=team_b_name
         )
-        team_a_h2h_agg_map_stats = aggregate_prev_match_map_stats(
-            prev_h2h_urls, current_match_data["team_a"]["name"]
+        if team_a_agg_map_stats.empty or team_b_agg_map_stats.empty:
+            print("skipping")
+            continue
+
+        team_a_agg_player_stats = aggregate_prev_matches_player_stats(
+            original_match_url=match_url,
+            match_urls=team_a_prev_matches_urls,
+            team_tag=current_match_data["team_a"]["tag"],
+            team_name=team_a_name,
         )
-        team_b_h2h_agg_map_stats = aggregate_prev_match_map_stats(
-            prev_h2h_urls, current_match_data["team_b"]["name"]
+        team_b_agg_player_stats = aggregate_prev_matches_player_stats(
+            original_match_url=match_url,
+            match_urls=team_b_prev_matches_urls,
+            team_tag=current_match_data["team_b"]["tag"],
+            team_name=team_b_name,
         )
 
-        print(team_a_agg_player_stats)
-        print(team_a_agg_map_stats)
+        team_a_h2h_agg_map_stats = aggregate_prev_match_map_stats(
+            match_urls=prev_h2h_urls, team_name=team_a_name
+        )
+        team_b_h2h_agg_map_stats = aggregate_prev_match_map_stats(
+            match_urls=prev_h2h_urls, team_name=team_b_name
+        )
+
+        matchup_stats_df = create_teams_matchups_stats_df(
+            match_url,
+            team_a_h2h_agg_map_stats,
+            team_b_h2h_agg_map_stats,
+            team_a_agg_map_stats,
+            team_b_agg_map_stats,
+        )
+
+        all_matchup_stats[match_url] = matchup_stats_df
+        all_players_stats.append(team_a_agg_player_stats)
+        all_players_stats.append(team_b_agg_player_stats)
+
+    all_players_stats_df = pd.concat(all_players_stats, axis=0)
+
+    combined_matchup_stats_df = pd.concat(all_matchup_stats.values()).reset_index()
+    repeat_count = len(combined_matchup_stats_df) // len(all_matchup_stats)
+
+    matchup_identifiers = []
+    for key in all_matchup_stats.keys():
+        matchup_identifiers.extend([key] * repeat_count)
+
+    combined_matchup_stats_df["Matchup"] = matchup_identifiers
+
+    combined_matchup_stats_df.to_csv(
+        "scraped_data/matches/teams_matchups_stats.csv", index=False
+    )
+    all_players_stats_df.to_csv(
+        "scraped_data/players_stats/team_players_stats.csv", index=False
+    )
