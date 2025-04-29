@@ -484,6 +484,6 @@ if __name__ == "__main__":
     combined_matchup_stats_df.to_csv(
         "scraped_data/matches/teams_matchups_stats.csv", index=False
     )
-    combined_matchup_stats_df.to_csv(
+    all_players_stats_df.to_csv(
         "scraped_data/players_stats/team_players_stats.csv", index=False
     )
