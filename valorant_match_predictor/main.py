@@ -284,7 +284,6 @@ def get_match_predictor_model(
         win_probabilities = win_probabilities[combined_mask]
 
         input_size = len(team_a_tensor[0]) + len(team_b_tensor[0])
-        print(input_size)
         match_predictor_nn = MatchPredictorNeuralNetwork(input_size=input_size)
         match_predictor_nn.train_model(team_a_tensor, team_b_tensor, win_probabilities)
 
@@ -365,7 +364,7 @@ def train(
     return pr_model, match_predictor_model
 
 
-def test(
+def test_assumed_winners(
     pr_model: Callable[[torch.Tensor], torch.Tensor],
     match_model: Callable[[torch.Tensor], torch.Tensor],
     thunderbird_match_odds: dict[str, dict[str, float]] = None,
@@ -404,8 +403,69 @@ def test(
     print(f"Expected Return If Bets Placed: ${(model_payout - thunderbird_payout):.2f}")
 
 
+def test_advantaged(
+    pr_model: Callable[[torch.Tensor], torch.Tensor],
+    match_model: Callable[[torch.Tensor], torch.Tensor],
+    thunderbird_match_odds: dict[str, dict[str, float]] = None,
+    vig: float = 0.08,  # 8% overround by default
+):
+    players_stats = load_scraped_teams_players_stats_from_csv()
+    matchups_stats = load_scraped_teams_matchups_stats_from_csv()
+
+    team_a_tensor, team_b_tensor, _ = create_match_input_tensors(
+        pr_model, players_stats, matchups_stats
+    )
+    with torch.no_grad():
+        prob_tensor = match_model(team_a_tensor, team_b_tensor).squeeze(1)
+
+    model_payout = thunderbird_payout = 0.0
+    bets_placed = 0
+    probs = prob_tensor.cpu().numpy()
+
+    for matchup_url, p in zip(matchups_stats["Matchup URL"].unique(), probs):
+        df = matchups_stats[matchups_stats["Matchup URL"] == matchup_url]
+        team_a, team_b = df["Matchup"].iloc[0].split("_vs_")
+        model_pred = match_decimal_odds(team_a, team_b, float(p))
+
+        # your model’s implied probabilities
+        imp_model = {team_a: p, team_b: 1 - p}
+
+        # raw book implied (from your single‐odd + inverse)
+        tb = thunderbird_match_odds[matchup_url]
+        raw_imp_thb = {t: 1.0 / tb[t] for t in (team_a, team_b)}
+
+        # **inflate by vig** so sum(raw_imp_thb) == 1 ⇒ sum ≈1+vig
+        imp_thb = {t: raw_imp_thb[t] * (1 + vig) for t in raw_imp_thb}
+
+        # only bet on true “value” edges
+        pick = None
+        for t in (team_a, team_b):
+            if imp_model[t] > imp_thb[t]:
+                pick = t
+                break
+        if pick is None:
+            continue  # no value this match
+
+        bets_placed += 1
+        winner = players_stats[
+            players_stats["Matchup URL"] == matchup_url
+        ]["Won Match"].iloc[0]
+
+        payouts = compute_payouts_for_match(
+            matchup_url, thunderbird_match_odds, model_pred, matchups_stats, winner
+        )
+        model_payout     += payouts["Model"][pick]
+        thunderbird_payout += payouts["Thunderbird"][pick]
+
+    print(f"--- Advantaged Bets Only (vig={vig*100:.0f}%) ---")
+    print(f"Bets Placed:         {bets_placed}")
+    print(f"Thunderbird Payout:  ${thunderbird_payout:.2f}")
+    print(f"Our Model Payout:    ${model_payout:.2f}")
+    print(f"Net Profit:          ${model_payout - thunderbird_payout:.2f}")
+
+
 if __name__ == "__main__":
     set_display_options()
     pr_model, match_model = train(years=["2022", "2023"])
     thunderbird_match_odds = load_year_thunderbird_match_odds_from_csv("2024")
-    test(pr_model, match_model, thunderbird_match_odds)
+    test_advantaged(pr_model, match_model, thunderbird_match_odds)

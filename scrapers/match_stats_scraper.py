@@ -236,7 +236,7 @@ def get_prev_n_match_urls(
 
         names = {s.get_text(strip=True) for s in a.select("span.m-item-team-name")}
         if new_match_url == original or (
-            excluded_team not in names and "americas" in new_match_url.lower()
+            excluded_team not in names and "china" not in new_match_url.lower()
         ):
             matches.append(new_match_url)
 
@@ -420,7 +420,7 @@ if __name__ == "__main__":
     all_matchup_stats = {}
     all_players_stats = []
     for i, match_url in enumerate(
-        list(load_year_thunderbird_match_odds_from_csv("2024").keys())[:2]
+        list(load_year_thunderbird_match_odds_from_csv("2024").keys())
     ):
         if "china" in match_url:
             continue
