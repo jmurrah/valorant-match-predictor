@@ -67,17 +67,23 @@ def create_match_input_tensors(
     players_stats: pd.DataFrame,
     matchups_data: pd.DataFrame,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    # feature_names = [
-    #     "Head-to-Head Round Win %",
-    #     "Head-to-Head Map Win %",
-    # ]
     team_a_features = []
     team_b_features = []
     win_probabilities = []
 
-    for matchup in matchups_data["Matchup"].unique():
-        matchup_data = matchups_data[matchups_data["Matchup"] == matchup]
-        team_a, team_b = matchup.split("_vs_")
+    using_matchup_url = False
+    matchups = matchups_data["Matchup"].unique()
+    if "Matchup URL" in matchups_data:
+        using_matchup_url = True
+        matchups = matchups_data["Matchup URL"].unique()
+
+    for matchup in matchups:
+        if using_matchup_url:
+            matchup_data = matchups_data[matchups_data["Matchup URL"] == matchup]
+            team_a, team_b = matchup_data["Matchup"].iloc[0].split("_vs_")
+        else:
+            matchup_data = matchups_data[matchups_data["Matchup"] == matchup]
+            team_a, team_b = matchup.split("_vs_")
 
         team_a_players_stats = players_stats[players_stats["Teams"] == team_a]
         team_b_players_stats = players_stats[players_stats["Teams"] == team_b]
@@ -266,7 +272,7 @@ def get_match_predictor_model(
         players_stats = year_data["players_stats"]["team_players_stats"]
         matchups_data = year_data["matches"]["teams_matchups_stats"]
 
-        team_a_tensor, team_b_tensor, win_probabilities, _ = create_match_input_tensors(
+        team_a_tensor, team_b_tensor, win_probabilities = create_match_input_tensors(
             pr_model, players_stats, matchups_data
         )
 
@@ -326,41 +332,30 @@ def train(
 def test(
     pr_model: Callable[[torch.Tensor], torch.Tensor],
     match_model: Callable[[torch.Tensor], torch.Tensor],
-    thunderbird_match_odds: dict[str, dict[str, float]],
+    thunderbird_match_odds: dict[str, dict[str, float]] = None,
 ):
-    # dataframes_by_year = read_in_data("data", years)
-    # transformed_data = transform_data(dataframes_by_year)
-    test_player_stats = load_scraped_teams_players_stats_from_csv()
-    test_matchup_stats = load_scraped_teams_matchups_stats_from_csv()
+    # 1. load the two CSVs into the exact same DataFrame shape your training loop expects
+    players_stats = load_scraped_teams_players_stats_from_csv()
+    matchups_stats = load_scraped_teams_matchups_stats_from_csv()
 
-    pred_match_probs = []
-    # test_matchup_urls = set([row["Matchup"] for _, row in test_player_stats.iterrows()])
-
-    # get the recent player stats before this game (likely through web scraping)
-    # get recent matchup stats
-
-    # players_stats = year_data["players_stats"]["team_players_stats"]
-    # matchups_data = year_data["matches"]["teams_matchups_stats"]
-
-    team_a_tensor, team_b_tensor, win_probabilities, _ = create_match_input_tensors(
-        pr_model, test_player_stats, test_matchup_stats
+    # 2. build the feature tensors (we ignore the ground‐truth win‐probs here)
+    team_a_tensor, team_b_tensor, win_probabilities = create_match_input_tensors(
+        pr_model, players_stats, matchups_stats
     )
 
-    team_a_mask = ~(torch.isnan(team_a_tensor).any(dim=1))
-    team_b_mask = ~(torch.isnan(team_b_tensor).any(dim=1))
-    team_a_tensor = team_a_tensor[team_a_mask]
-    team_b_tensor = team_b_tensor[team_b_mask]
+    # 3. run your ensemble match predictor
+    with torch.no_grad():
+        prob_tensor = match_model(team_a_tensor, team_b_tensor).squeeze(1)
 
-    probabilities = match_model(team_a_tensor, team_b_tensor)
-    # pred_match_probs.append(probabilities)
+    probs = prob_tensor.cpu().numpy()
 
-    # predicted_odds = compute_odds(pred_match_probs)
+    # 4. print a P(Team A wins) for each matchup
+    for matchup, p in zip(matchups_stats["Matchup URL"].unique(), probs):
+        print(f"{matchup}: P(Team A wins) = {p:.3f}")
 
 
 if __name__ == "__main__":
-    # set_display_options()
-    # pr_model, match_model = train(years=["2022", "2023"])
+    set_display_options()
+    pr_model, match_model = train(years=["2022", "2023"])
     thunderbird_match_odds = load_year_thunderbird_match_odds_from_csv("2024")
-    # print(thunderbird_match_odds)
-    # test(pr_model, match_model, thunderbird_match_odds)
-    test()
+    test(pr_model, match_model, thunderbird_match_odds)

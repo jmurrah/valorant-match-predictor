@@ -233,14 +233,14 @@ def transform_data(
 
     for year in dataframes_by_year:
         print(f"Transforming data for {year}!")
-        transformed_dataframes_by_year[year]["players_stats"]["team_players_stats"] = (
-            transform_players_stats(
-                dataframes_by_year[year]["players_stats"]["players_stats"]
-            )
+        transformed_dataframes_by_year[year]["players_stats"][
+            "team_players_stats"
+        ] = transform_players_stats(
+            dataframes_by_year[year]["players_stats"]["players_stats"]
         )
-        transformed_dataframes_by_year[year]["matches"]["teams_matchups_stats"] = (
-            transform_maps_scores(dataframes_by_year[year]["matches"]["maps_scores"])
-        )
+        transformed_dataframes_by_year[year]["matches"][
+            "teams_matchups_stats"
+        ] = transform_maps_scores(dataframes_by_year[year]["matches"]["maps_scores"])
 
     return transformed_dataframes_by_year
 

@@ -355,8 +355,8 @@ def aggregate_prev_matches_player_stats(
         .to_frame()
         .T
     )
-    df.insert(0, "Matchup", original_match_url)
-    df.insert(1, "Team Name", team_name)
+    df.insert(0, "Matchup URL", original_match_url)
+    df.insert(1, "Teams", team_name)
     return df
 
 
@@ -372,7 +372,7 @@ def create_teams_matchups_stats_df(
 ):
     return pd.DataFrame(
         {
-            "Match URL": [match_url] * 4,
+            "Matchup URL": [match_url] * 4,
             "Matchup": [f"{team_a}_vs_{team_b}"] * 4,
             "Teams": ["A", "A", "B", "B"],
             "Opponent": ["B", "Others", "A", "Others"],
@@ -401,7 +401,7 @@ if __name__ == "__main__":
     all_matchup_stats = {}
     all_players_stats = []
     for i, match_url in enumerate(
-        list(load_year_thunderbird_match_odds_from_csv("2024").keys())
+        list(load_year_thunderbird_match_odds_from_csv("2024").keys())[:2]
     ):
         # match_url = "https://www.vlr.gg/280446/kr-esports-vs-leviat-n-argentina-game-show-cup-2023-showmatch"
         if "china" in match_url:
@@ -473,7 +473,7 @@ if __name__ == "__main__":
             team_b_agg_map_stats,
         )
 
-        all_matchup_stats[match_url] = matchup_stats_df
+        all_matchup_stats[f"{team_a_name}_vs_{team_b_name}"] = matchup_stats_df
         all_players_stats.append(team_a_agg_player_stats)
         all_players_stats.append(team_b_agg_player_stats)
 
