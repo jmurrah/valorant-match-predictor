@@ -8,7 +8,7 @@ from torch.utils.data import TensorDataset, DataLoader
 class MatchPredictorNeuralNetwork(nn.Module):
     def __init__(
         self,
-        input_size,
+        input_size: int,
         hidden_sizes: list[int] = [64, 32],
         dropout: float = 0.2,
     ):
@@ -22,10 +22,6 @@ class MatchPredictorNeuralNetwork(nn.Module):
     def forward(
         self, pr_features: torch.Tensor, other_feats: torch.Tensor
     ) -> torch.Tensor:
-        """
-        pr_features: (batch_size, pr_feat_dim)
-        other_feats:{batch_size, other_feat_dim}
-        """
         x = torch.cat([pr_features, other_feats], dim=1)
         x = F.relu(self.layer1(x))
         x = self.dropout(x)
@@ -37,13 +33,17 @@ class MatchPredictorNeuralNetwork(nn.Module):
         team_a_features: torch.Tensor,
         team_b_features: torch.Tensor,
         win_labels: torch.Tensor,
-        epochs: int = 200,
+        epochs: int = 500,
         learning_rate: float = 0.001,
         batch_size: int = 16,
+        patience: int = 20,
     ):
-        optimizer = torch.optim.Adam(self.parameters(), lr=learning_rate)
         ds = TensorDataset(team_a_features, team_b_features, win_labels)
         dl = DataLoader(ds, batch_size=batch_size, shuffle=True)
+        optimizer = optim.Adam(self.parameters(), lr=learning_rate)
+
+        best_loss = float("inf")
+        epochs_no_improve = 0
 
         self.train()
         for epoch in range(1, epochs + 1):
@@ -55,9 +55,25 @@ class MatchPredictorNeuralNetwork(nn.Module):
                 loss.backward()
                 optimizer.step()
                 total_loss += loss.item()
+
+            avg_loss = total_loss / len(dl)
+
+            # Early stopping check
+            if avg_loss < best_loss:
+                best_loss = avg_loss
+                epochs_no_improve = 0
+            else:
+                epochs_no_improve += 1
+                if epochs_no_improve >= patience:
+                    print(
+                        f"Early stopping at epoch {epoch} "
+                        f"(no improvement in {patience} epochs)"
+                    )
+                    break
+
             if epoch % 10 == 0:
-                avg = total_loss / len(dl)
-                print(f"Epoch {epoch}/{epochs}, Loss: {avg:.4f}")
+                print(f"Epoch {epoch}/{epochs}, Loss: {avg_loss:.4f}")
+
         self.eval()
 
     def predict(
@@ -108,8 +124,7 @@ class PowerRatingNeuralNetwork(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         z = self.encoder(x)
-        x_recon = self.decoder(z)
-        return x_recon
+        return self.decoder(z)
 
     def encode(self, x: torch.Tensor) -> torch.Tensor:
         return self.encoder(x)
@@ -117,19 +132,23 @@ class PowerRatingNeuralNetwork(nn.Module):
     def train_model(
         self,
         feature_tensor: torch.Tensor,
-        epochs: int = 200,
+        epochs: int = 500,
         learning_rate: float = 0.001,
         batch_size: int = 16,
         print_every: int = 10,
+        patience: int = 20,
     ) -> None:
-        # print(feature_tensor)
         assert not torch.isnan(feature_tensor).any(), "Input contains NaN!"
         assert not torch.isinf(feature_tensor).any(), "Input contains Inf!"
 
-        optimizer = optim.Adam(self.parameters(), lr=learning_rate)
         dataloader = DataLoader(
             TensorDataset(feature_tensor), batch_size=batch_size, shuffle=True
         )
+        optimizer = optim.Adam(self.parameters(), lr=learning_rate)
+
+        best_loss = float("inf")
+        epochs_no_improve = 0
+        best_state = None
 
         self.train()
         for epoch in range(1, epochs + 1):
@@ -139,15 +158,33 @@ class PowerRatingNeuralNetwork(nn.Module):
                 X_recon = self(X_batch)
                 loss = self.criterion(X_recon, X_batch)
                 loss.backward()
-
-                # clip gradients
                 torch.nn.utils.clip_grad_norm_(self.parameters(), max_norm=1.0)
                 optimizer.step()
                 total_loss += loss.item()
 
+            avg_loss = total_loss / len(dataloader)
+
+            # Early stopping check
+            if avg_loss < best_loss:
+                best_loss = avg_loss
+                epochs_no_improve = 0
+                best_state = self.state_dict()
+            else:
+                epochs_no_improve += 1
+                if epochs_no_improve >= patience:
+                    print(
+                        f"Early stopping at epoch {epoch} "
+                        f"(no recon improvement for {patience} epochs)"
+                    )
+                    break
+
             if epoch % print_every == 0:
-                avg = total_loss / len(dataloader)
-                print(f"Epoch {epoch}/{epochs} — Recon Loss: {avg:.4f}")
+                print(f"Epoch {epoch}/{epochs} — Recon Loss: {avg_loss:.4f}")
+
+        # restore best weights if early‐stopped
+        if best_state is not None:
+            self.load_state_dict(best_state)
+        self.eval()
 
     def predict(self, feature_tensor: torch.Tensor) -> float:
         self.eval()
