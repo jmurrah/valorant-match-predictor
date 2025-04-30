@@ -3,6 +3,13 @@ import pandas as pd
 import numpy as np
 from sklearn.preprocessing import StandardScaler
 
+from sklearn.metrics import log_loss, brier_score_loss
+from sklearn.calibration import calibration_curve
+import numpy as np
+from scipy.stats import ttest_rel
+from scipy.stats import bootstrap
+
+
 from typing import Callable
 
 from helper import (
@@ -115,8 +122,8 @@ def create_match_input_tensors(
                 torch.tensor(np.array(team_b_pr_feature), dtype=torch.float32)
             )
 
-        team_a_pr_vector = team_a_pr_encoded.squeeze(1).flatten().numpy()
-        team_b_pr_vector = team_b_pr_encoded.squeeze(1).flatten().numpy()
+        team_a_pr_vector = team_a_pr_encoded.detach().cpu().numpy().ravel()
+        team_b_pr_vector = team_b_pr_encoded.detach().cpu().numpy().ravel()
 
         team_a_feature = np.array(create_team_feature(team_a_vs_b_stats))
         team_b_feature = np.array(create_team_feature(team_b_vs_a_stats))
@@ -201,18 +208,19 @@ def create_final_pr_model(
 
 def create_final_match_model(
     models: list[MatchPredictorNeuralNetwork],
-) -> Callable[[torch.Tensor, torch.Tensor], float]:
+) -> Callable[[torch.Tensor, torch.Tensor], torch.Tensor]:
     def final_prediction(
         team_a_features: torch.Tensor, team_b_features: torch.Tensor
-    ) -> float:
+    ) -> torch.Tensor:
         for model in models:
             model.eval()
 
         with torch.no_grad():
-            predictions = torch.stack(
-                [model(team_a_features, team_b_features) for model in models]
+            logits = torch.stack(
+                [model(team_a_features, team_b_features) for model in models], dim=0
             )
-            return torch.mean(predictions, dim=0)
+            probs = torch.sigmoid(logits)
+            return torch.mean(probs, dim=0)
 
     return final_prediction
 
@@ -325,13 +333,8 @@ def match_decimal_odds(
     return {team_a: odd_a, team_b: odd_b}
 
 
-def print_tables(y_true, p_model, p_book, vig_book_odds):
-    from sklearn.metrics import log_loss, brier_score_loss
-    from sklearn.calibration import calibration_curve
-    import numpy as np
-    from scipy.stats import ttest_rel
-    from scipy.stats import bootstrap
-
+def print_tables(header, y_true, p_model, p_book, vig_book_odds):
+    print(header)
     # Log-loss & Brier
     log_model = log_loss(y_true, p_model, labels=[0, 1])
     log_book = log_loss(y_true, p_book, labels=[0, 1])
@@ -527,7 +530,7 @@ def test_advantaged(
     roi_vig = 100 * bankroll_vig / bets if bets else 0.0
     edge_loss = 100 * (bankroll_raw - bankroll_vig) / bets
 
-    print("\n--- Results ---")
+    print("\n--- ADVANTAGED BETTING Results ---")
     print(f"Bets placed:                      {bets}")
     print(f"Average model EV:                 {avg_ev:+.3f}")
     print(
@@ -538,6 +541,14 @@ def test_advantaged(
     )
     print(f"Edge lost to vig:                 {edge_loss:+.1f}% of stakes")
     print_tables(
+        "ADVANTAGED BETTING Scoring Metrics",
+        np.array(y_true, dtype=int),
+        np.array(p_model),
+        np.array(p_book),
+        np.array(vig_book_odds),
+    )
+    print_tables(
+        "Full-Sample Scoring Metrics",
         np.array(y_true, dtype=int),
         np.array(p_model),
         np.array(p_book),

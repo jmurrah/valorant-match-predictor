@@ -9,8 +9,8 @@ class MatchPredictorNeuralNetwork(nn.Module):
     def __init__(
         self,
         input_size: int,
-        hidden_sizes: list[int] = [64, 32],
-        dropout: float = 0.2,
+        hidden_sizes: list[int] = [64, 48],
+        dropout: float = 0.125,
     ):
         super().__init__()
         self.layer1 = nn.Linear(input_size, hidden_sizes[0])
@@ -34,7 +34,7 @@ class MatchPredictorNeuralNetwork(nn.Module):
         team_b_features: torch.Tensor,
         win_labels: torch.Tensor,
         epochs: int = 500,
-        learning_rate: float = 0.001,
+        learning_rate: float = 0.0006,
         batch_size: int = 16,
         patience: int = 20,
     ):
@@ -90,8 +90,8 @@ class PowerRatingNeuralNetwork(nn.Module):
         self,
         input_size: int,
         latent_dim: int = 8,
-        hidden_dims: list[int] = [64, 32],
-        dropout: float = 0.1,
+        hidden_dims: list[int] = [32, 16],
+        dropout: float = 0.3,
     ) -> None:
         super().__init__()
         # build encoder

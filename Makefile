@@ -15,3 +15,6 @@ scrape-odds:
 
 scrape-matches:
 	poetry run python3 -m scrapers.match_stats_scraper
+
+tune:
+	poetry run python -m valorant_match_predictor.hyperparam_tuning
