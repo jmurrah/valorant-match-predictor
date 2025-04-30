@@ -37,7 +37,7 @@ class MatchPredictorNeuralNetwork(nn.Module):
         team_a_features: torch.Tensor,
         team_b_features: torch.Tensor,
         win_labels: torch.Tensor,
-        epochs: int = 1000,
+        epochs: int = 200,
         learning_rate: float = 0.001,
         batch_size: int = 16,
     ):
@@ -117,7 +117,7 @@ class PowerRatingNeuralNetwork(nn.Module):
     def train_model(
         self,
         feature_tensor: torch.Tensor,
-        epochs: int = 1000,
+        epochs: int = 200,
         learning_rate: float = 0.001,
         batch_size: int = 16,
         print_every: int = 10,

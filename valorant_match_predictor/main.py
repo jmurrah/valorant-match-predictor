@@ -431,7 +431,6 @@ def test_advantaged(
         odds = match_decimal_odds(team_a, team_b, float(p))
         odd_a, odd_b = odds[team_a], odds[team_b]
 
-
         ev_a = p * (odd_a - 1) - (1 - p)
         ev_b = (1 - p) * (odd_b - 1) - (p)
 
@@ -442,10 +441,10 @@ def test_advantaged(
             pick, ev_pick = team_b, ev_b
         else:
             continue
-        
+
         bets_placed += 1
         ev_values.append(ev_pick)
-        
+
         winner = players_stats[players_stats["Matchup URL"] == matchup_url][
             "Won Match"
         ].iloc[0]
@@ -453,14 +452,22 @@ def test_advantaged(
         payouts = compute_payouts_for_match(
             matchup_url, thunderbird_match_odds, model_pred, matchups_stats, winner
         )
-        model_payout += payouts["Model"][pick]
-        thunderbird_payout += payouts["Thunderbird"][pick]
+        model_ret = payouts["Model"][pick]
+        book_ret = payouts["Thunderbird"][pick]
+        model_payout += model_ret
+        thunderbird_payout += book_ret
+
+    net_profit = model_payout - thunderbird_payout
+    roi = (net_profit / bets_placed * 100) if bets_placed else 0.0
+    avg_ev = (sum(ev_values) / bets_placed) if bets_placed else 0.0
 
     print(f"--- Expected Value Bets Only (vig={vig*100:.0f}%) ---")
     print(f"Bets Placed:         {bets_placed}")
+    print(f"Avg. EV per Bet:     {avg_ev:.3f}")
     print(f"Thunderbird Payout:  ${thunderbird_payout:.2f}")
     print(f"Our Model Payout:    ${model_payout:.2f}")
-    print(f"Net Profit:          ${model_payout - thunderbird_payout:.2f}")
+    print(f"Net Profit:          ${net_profit:.2f}")
+    print(f"ROI:                 {roi:.1f}%")
 
 
 if __name__ == "__main__":
@@ -468,4 +475,4 @@ if __name__ == "__main__":
     pr_model, match_model = train(years=["2022", "2023"])
     thunderbird_match_odds = load_year_thunderbird_match_odds_from_csv("2024")
     test_advantaged(pr_model, match_model, thunderbird_match_odds, vig=0.00)
-    test_advantaged(pr_model, match_model, thunderbird_match_odds, vig=0.08)
+    # test_advantaged(pr_model, match_model, thunderbird_match_odds, vig=0.08)

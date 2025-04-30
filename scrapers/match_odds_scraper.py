@@ -113,16 +113,24 @@ def get_match_odds(url: str) -> dict[str, float]:
         text = odds_div.get_text(" ", strip=True)
 
         winning_team = re.search(r"on\s+(.+?)\s+returned", text).group(1)
-        odd = float(
+
+        d1_raw = float(
             re.search(r"at\s+([0-9]+(?:\.[0-9]+)?)\s+pre-match odds", text).group(1)
         )
 
-        implied_p = 1.0 / odd
-        inverse = 1.0 / (1.0 - implied_p)
+        q1 = 1.0 / d1_raw
+        R = 1.0 + 0.08  # remove the vig of 8%
+        q2 = R - q1
+
+        q1_fair = q1 / R
+        q2_fair = q2 / R
+
+        d1_fair = 1.0 / q1_fair
+        d2_fair = 1.0 / q2_fair
 
         return {
-            team_a: round(odd if team_a == winning_team else inverse, 4),
-            team_b: round(odd if team_b == winning_team else inverse, 4),
+            team_a: round(d1_fair, 4) if team_a == winning_team else round(d2_fair, 4),
+            team_b: round(d1_fair, 4) if team_b == winning_team else round(d2_fair, 4),
         }
 
     except Exception as e:
@@ -149,12 +157,14 @@ def save_year_match_odds_to_csv(
 
 
 if __name__ == "__main__":
-    years = ["2025"]
+    years = ["2024"]
 
     for year in years:
         yearly_match_odds = defaultdict(dict)
 
         for match_url in get_yearly_match_urls(year):
+            if "americas" not in match_url:
+                continue
             log.info(f"→ {match_url}")
             odds = get_match_odds(match_url)
             if not odds:
