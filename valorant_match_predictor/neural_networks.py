@@ -11,8 +11,8 @@ class MatchPredictorNeuralNetwork(nn.Module):
     def __init__(
         self,
         input_size: int,
-        hidden_sizes: list[int] = [256, 192],
-        dropout: float = 0.4,
+        hidden_sizes: list[int] = [512, 432],
+        dropout: float = 0.066,
     ):
         super().__init__()
         self.layer1 = nn.Linear(input_size, hidden_sizes[0])
@@ -36,8 +36,8 @@ class MatchPredictorNeuralNetwork(nn.Module):
         team_b_features: torch.Tensor,
         win_labels: torch.Tensor,
         epochs: int = 500,
-        learning_rate: float = 0.0065,
-        batch_size: int = 32,
+        learning_rate: float = 0.0019,
+        batch_size: int = 16,
         patience: int = 20,
     ):
         ds = TensorDataset(team_a_features, team_b_features, win_labels)

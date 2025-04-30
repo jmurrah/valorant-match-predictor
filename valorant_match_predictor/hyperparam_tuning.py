@@ -1,9 +1,3 @@
-"""
-Optuna multi-objective tuning for MatchPredictorNeuralNetwork
-   – Objective-1:  minimise log-loss
-   – Objective-2:  minimise |calibration-slope − 1|
-Extra metrics (Brier, raw slope) are stored and printed.
-"""
 from __future__ import annotations
 
 import warnings
@@ -26,9 +20,7 @@ from valorant_match_predictor.main import (
 )
 from valorant_match_predictor.neural_networks import MatchPredictorNeuralNetwork
 
-# ──────────────────────────────────────────────────────────────
-# 1. Load + transform data once (outside the Optuna objective)
-# ──────────────────────────────────────────────────────────────
+
 YEARS = ["2022", "2023"]
 dfs_by_year = read_in_data("data", YEARS)
 transformed = transform_data(dfs_by_year)
@@ -57,12 +49,9 @@ team_b_all = torch.cat(team_b_all)
 y_all = torch.cat(y_all)
 print(f"Prepared {len(team_a_all)} samples from {YEARS}")
 
-# ──────────────────────────────────────────────────────────────
-# 2. Helpers
-# ──────────────────────────────────────────────────────────────
-warnings.simplefilter("ignore", RankWarning)  # silence polyfit warnings
-BIG_PENALTY = 9_999.0  # huge number to penalise bad slope
 
+warnings.simplefilter("ignore", RankWarning)
+BIG_PENALTY = 9_999.0
 
 def safe_slope(obs: np.ndarray, pred: np.ndarray) -> tuple[float, float]:
     """return (slope, |slope-1|); protect against ill-conditioned polyfit"""
@@ -81,9 +70,6 @@ def pprint_trial(tag: str, t: optuna.trial.FrozenTrial) -> None:
     )
 
 
-# ──────────────────────────────────────────────────────────────
-# 3. Optuna objective
-# ──────────────────────────────────────────────────────────────
 def objective(trial: optuna.trial.Trial) -> tuple[float, float]:
     # hyper-parameters to sample
     h1 = trial.suggest_int("hidden1", 64, 512, step=64)
@@ -133,13 +119,10 @@ def objective(trial: optuna.trial.Trial) -> tuple[float, float]:
     obs, pred = calibration_curve(truths, preds, n_bins=10)
     slope, slope_err = safe_slope(obs, pred)
 
-    trial.set_user_attr("brier", brier)  # store extra metric
+    trial.set_user_attr("brier", brier)
     return ll, slope_err
 
 
-# ──────────────────────────────────────────────────────────────
-# 4. Run study
-# ──────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     study = optuna.create_study(
         directions=["minimize", "minimize"],

@@ -268,10 +268,9 @@ def create_final_match_model(
             model.eval()
 
         with torch.no_grad():
-            logits = torch.stack(
+            probs = torch.stack(
                 [model(team_a_features, team_b_features) for model in models], dim=0
             )
-            probs = torch.sigmoid(logits)
             return torch.mean(probs, dim=0)
 
     return final_prediction
