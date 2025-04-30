@@ -19,6 +19,7 @@ from valorant_match_predictor import (
     read_in_data,
     transform_data,
     print_transformed_data_structure,
+    cross_validate_match_predictor,
 )
 
 
@@ -127,7 +128,8 @@ def create_match_input_tensors(
             np.concatenate([team_b_pr_vector, team_b_feature], axis=0)
         )
 
-        win_probabilities.append(team_a_vs_b_stats["Map Win Pct"].values[0])
+        win_prob = team_a_vs_others_stats["Round Win Pct"].values[0]
+        win_probabilities.append(win_prob)
 
     team_a_tensor = torch.from_numpy(
         np.stack(team_a_features, axis=0).astype(np.float32)
@@ -138,6 +140,17 @@ def create_match_input_tensors(
     win_probabilities_tensor = torch.tensor(
         win_probabilities, dtype=torch.float32
     ).unsqueeze(1)
+
+    # ------------- sanitise ------------------------------------------------
+    bad_row_mask = (
+        torch.isnan(team_a_tensor).any(dim=1)
+        | torch.isnan(team_b_tensor).any(dim=1)
+        | torch.isnan(win_probabilities_tensor).squeeze(1)
+    )
+    keep = ~bad_row_mask
+    team_a_tensor = team_a_tensor[keep]
+    team_b_tensor = team_b_tensor[keep]
+    win_probabilities_tensor = win_probabilities_tensor[keep].clamp(1e-6, 1.0 - 1e-6)
 
     return team_a_tensor, team_b_tensor, win_probabilities_tensor
 
@@ -353,115 +366,143 @@ def compute_payouts_for_match(
 
 def train(
     years: list[str],
-) -> tuple[
-    Callable[[torch.Tensor], torch.Tensor], Callable[[torch.Tensor], torch.Tensor]
-]:
+) -> tuple[Callable[[torch.Tensor], torch.Tensor], MatchPredictorNeuralNetwork,]:
+    # -- 1. load & transform --
     dataframes_by_year = read_in_data("data", years)
     transformed_data = transform_data(dataframes_by_year)
+
+    # -- 2. train the auto‐encoder power‐rating model as before --
     pr_model = get_power_rating_model(transformed_data)
-    match_predictor_model = get_match_predictor_model(pr_model, transformed_data)
 
-    return pr_model, match_predictor_model
+    # -- 3. build one big tensor for match‐predictor across all years --
+    all_a, all_b, all_y = [], [], []
+    for year_data in transformed_data.values():
+        ta, tb, ty = create_match_input_tensors(
+            pr_model,
+            year_data["players_stats"]["team_players_stats"],
+            year_data["matches"]["teams_matchups_stats"],
+        )
+        all_a.append(ta)
+        all_b.append(tb)
+        all_y.append(ty)
 
+    team_a_tensor = torch.cat(all_a, dim=0)
+    team_b_tensor = torch.cat(all_b, dim=0)
+    win_labels = torch.cat(all_y, dim=0)
 
-def test_assumed_winners(
-    pr_model: Callable[[torch.Tensor], torch.Tensor],
-    match_model: Callable[[torch.Tensor], torch.Tensor],
-    thunderbird_match_odds: dict[str, dict[str, float]] = None,
-):
-    players_stats = load_scraped_teams_players_stats_from_csv()
-    matchups_stats = load_scraped_teams_matchups_stats_from_csv()
+    # -- 4. OPTIONAL: cross‐validate to pick best hyperparams --
+    input_size = team_a_tensor.shape[1] + team_b_tensor.shape[1]
 
-    team_a_tensor, team_b_tensor, _ = create_match_input_tensors(
-        pr_model, players_stats, matchups_stats
+    cross_validate_match_predictor(
+        input_size=input_size,
+        team_a_features=team_a_tensor,
+        team_b_features=team_b_tensor,
+        win_labels=win_labels,
+        k=5,
     )
 
-    with torch.no_grad():
-        prob_tensor = match_model(team_a_tensor, team_b_tensor).squeeze(1)
+    # -- 5. final train with early stopping on a 10% hold-out --
+    match_model = MatchPredictorNeuralNetwork(
+        input_size=input_size,
+        hidden_sizes=[512, 256],
+        dropout=0.2,
+        weight_decay=1e-5,
+    )
+    match_model.train_model(
+        team_a_tensor,
+        team_b_tensor,
+        win_labels,
+        learning_rate=1e-3,
+        batch_size=16,
+        patience=50,  # no val-loss improvement for 50 epochs → stop
+        val_frac=0.1,  # 10% held out internally
+    )
 
-    model_payout = thunderbird_payout = 0
-    probs = prob_tensor.cpu().numpy()
-    for matchup_url, p in zip(matchups_stats["Matchup URL"].unique(), probs):
-        matchup_data = matchups_stats[matchups_stats["Matchup URL"] == matchup_url]
-        team_a, team_b = matchup_data["Matchup"].iloc[0].split("_vs_")
-        model_pred = match_decimal_odds(team_a, team_b, float(p))
-
-        winner = players_stats[players_stats["Matchup URL"] == matchup_url][
-            "Won Match"
-        ].iloc[0]
-
-        payouts = compute_payouts_for_match(
-            matchup_url, thunderbird_match_odds, model_pred, matchups_stats, winner
-        )
-
-        model_payout += payouts["Model"][winner]
-        thunderbird_payout += payouts["Thunderbird"][winner]
-
-    print("--- Results! ($1 bet per match) ---")
-    print(f"Thunderbird Payout: ${thunderbird_payout:.2f}")
-    print(f"Model Payout: ${model_payout:.2f}")
-    print(f"Expected Return If Bets Placed: ${(model_payout - thunderbird_payout):.2f}")
+    return pr_model, match_model
 
 
 def test_advantaged(
     pr_model: Callable[[torch.Tensor], torch.Tensor],
     match_model: Callable[[torch.Tensor], torch.Tensor],
     thunderbird_match_odds: dict[str, dict[str, float]] = None,
-    vig: float = 0.08,  # 8% overround by default
+    vig: float = 0.00,  # e.g. 0.08 for 8% overround
 ):
+    """
+    Simulate a flat-$1 advantaged betting strategy:
+      - Compute model EV per match
+      - Bet $1 whenever EV > 0
+      - Track cumulative payouts, net profit, and ROI
+    """
+    # Load scraped data
     players_stats = load_scraped_teams_players_stats_from_csv()
     matchups_stats = load_scraped_teams_matchups_stats_from_csv()
 
+    # Build input tensors for all matchups
     team_a_tensor, team_b_tensor, _ = create_match_input_tensors(
         pr_model, players_stats, matchups_stats
     )
     with torch.no_grad():
+        # Predict win probabilities for Team A
         prob_tensor = match_model(team_a_tensor, team_b_tensor).squeeze(1)
 
-    model_payout = thunderbird_payout = 0.0
+    # Initialize tracking variables
+    model_payout = 0.0
+    thunderbird_payout = 0.0
     bets_placed = 0
+
+    # Convert to NumPy for iteration
     probs = prob_tensor.cpu().numpy()
 
+    # Iterate through each unique matchup
     for matchup_url, p in zip(matchups_stats["Matchup URL"].unique(), probs):
+        # Extract team names
         df = matchups_stats[matchups_stats["Matchup URL"] == matchup_url]
         team_a, team_b = df["Matchup"].iloc[0].split("_vs_")
-        model_pred = match_decimal_odds(team_a, team_b, float(p))
 
-        # your model’s implied probabilities
-        imp_model = {team_a: p, team_b: 1 - p}
+        # 1) Compute your model’s decimal‐odds dict for both teams
+        model_odds = match_decimal_odds(team_a, team_b, float(p))
+        #    and extract the float odd for Team A:
+        model_odd_a = model_odds[team_a]
 
-        # raw book implied (from your single‐odd + inverse)
-        tb = thunderbird_match_odds[matchup_url]
-        raw_imp_thb = {t: 1.0 / tb[t] for t in (team_a, team_b)}
+        # 2) Compute EV for a $1 bet on Team A:
+        #    EV = p*(d - 1) - (1 - p)
+        ev_model = p * (model_odd_a - 1) - (1 - p)
 
-        # **inflate by vig** so sum(raw_imp_thb) == 1 ⇒ sum ≈1+vig
-        imp_thb = {t: raw_imp_thb[t] * (1 + vig) for t in raw_imp_thb}
-
-        # only bet on true “value” edges
-        pick = None
-        for t in (team_a, team_b):
-            if imp_model[t] > imp_thb[t]:
-                pick = t
-                break
-        if pick is None:
-            continue  # no value this match
+        # 3) Flat‐stake: bet $1 only if EV > 0
+        if ev_model <= 0:
+            continue
 
         bets_placed += 1
-        winner = players_stats[
-            players_stats["Matchup URL"] == matchup_url
-        ]["Won Match"].iloc[0]
+        pick = team_a
 
+        # 4) Determine actual winner
+        winner = players_stats[players_stats["Matchup URL"] == matchup_url][
+            "Won Match"
+        ].iloc[0]
+
+        # 5) Compute and accumulate payouts
+        #    we still pass the full dict so compute_payouts can do both sides
         payouts = compute_payouts_for_match(
-            matchup_url, thunderbird_match_odds, model_pred, matchups_stats, winner
+            matchup_url,
+            thunderbird_match_odds,
+            model_odds,  # <-- pass the dict here
+            matchups_stats,
+            winner,
         )
-        model_payout     += payouts["Model"][pick]
+        model_payout += payouts["Model"][pick]
         thunderbird_payout += payouts["Thunderbird"][pick]
 
+    # 6) After all bets, compute net profit and ROI
+    net_profit = model_payout - thunderbird_payout
+    roi = (net_profit / bets_placed) * 100 if bets_placed > 0 else 0.0
+
+    # 7) Print results
     print(f"--- Advantaged Bets Only (vig={vig*100:.0f}%) ---")
     print(f"Bets Placed:         {bets_placed}")
     print(f"Thunderbird Payout:  ${thunderbird_payout:.2f}")
     print(f"Our Model Payout:    ${model_payout:.2f}")
-    print(f"Net Profit:          ${model_payout - thunderbird_payout:.2f}")
+    print(f"Net Profit:          ${net_profit:.2f}")
+    print(f"ROI:                 {roi:.1f}%")
 
 
 if __name__ == "__main__":
