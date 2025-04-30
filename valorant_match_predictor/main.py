@@ -9,6 +9,11 @@ import numpy as np
 from scipy.stats import ttest_rel
 from scipy.stats import bootstrap
 
+import warnings
+
+# from numpy.lib.polynomial import RankWarning
+from numpy.polynomial.polyutils import RankWarning
+
 
 from typing import Callable
 
@@ -27,6 +32,9 @@ from valorant_match_predictor import (
     transform_data,
     print_transformed_data_structure,
 )
+
+
+warnings.simplefilter("ignore", RankWarning)
 
 
 def set_pandas_options() -> None:

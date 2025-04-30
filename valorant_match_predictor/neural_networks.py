@@ -10,7 +10,7 @@ class MatchPredictorNeuralNetwork(nn.Module):
         self,
         input_size: int,
         hidden_sizes: list[int] = [128, 64],
-        dropout: float = 0.03,
+        dropout: float = 0.7,
     ):
         super().__init__()
         self.layer1 = nn.Linear(input_size, hidden_sizes[0])
@@ -58,7 +58,6 @@ class MatchPredictorNeuralNetwork(nn.Module):
 
             avg_loss = total_loss / len(dl)
 
-            # Early stopping check
             if avg_loss < best_loss:
                 best_loss = avg_loss
                 epochs_no_improve = 0
@@ -112,10 +111,7 @@ class PowerRatingNeuralNetwork(nn.Module):
         decoder_layers.append(nn.Linear(prev_dim, input_size))
         self.decoder = nn.Sequential(*decoder_layers)
 
-        # reconstruction loss
         self.criterion = nn.MSELoss()
-
-        # Xavier‐initialize all weights
         for m in self.modules():
             if isinstance(m, nn.Linear):
                 nn.init.xavier_uniform_(m.weight)
@@ -138,9 +134,6 @@ class PowerRatingNeuralNetwork(nn.Module):
         print_every: int = 10,
         patience: int = 20,
     ) -> None:
-        assert not torch.isnan(feature_tensor).any(), "Input contains NaN!"
-        assert not torch.isinf(feature_tensor).any(), "Input contains Inf!"
-
         dataloader = DataLoader(
             TensorDataset(feature_tensor), batch_size=batch_size, shuffle=True
         )
@@ -164,7 +157,6 @@ class PowerRatingNeuralNetwork(nn.Module):
 
             avg_loss = total_loss / len(dataloader)
 
-            # Early stopping check
             if avg_loss < best_loss:
                 best_loss = avg_loss
                 epochs_no_improve = 0
