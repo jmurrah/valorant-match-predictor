@@ -1,8 +1,10 @@
+from __future__ import annotations
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import TensorDataset, DataLoader
+from sklearn.preprocessing import StandardScaler
 
 
 class MatchPredictorNeuralNetwork(nn.Module):
@@ -182,3 +184,26 @@ class PowerRatingNeuralNetwork(nn.Module):
         with torch.no_grad():
             z = self.encode(feature_tensor)
         return z.item()
+
+
+class ScaledPRModel:
+    def __init__(
+        self, models: list[PowerRatingNeuralNetwork], scaler: StandardScaler
+    ) -> None:
+        self.models = models
+        self.scaler = scaler
+        for m in self.models:
+            m.eval()
+
+    def __call__(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        x : (n_samples, n_raw_features) **un-scaled**
+        returns: (ensemble_mean, ...) same shape as each model output
+        """
+        # numpy -> transform -> torch
+        x_scaled = self.scaler.transform(x.numpy())
+        x_scaled = torch.tensor(x_scaled, dtype=torch.float32)
+
+        with torch.no_grad():
+            preds = torch.stack([m.encode(x_scaled) for m in self.models], 0)
+            return preds.mean(0)

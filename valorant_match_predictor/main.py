@@ -12,6 +12,9 @@ from scipy.stats import bootstrap
 import warnings
 from numpy.polynomial.polyutils import RankWarning
 
+from valorant_match_predictor import ScaledPRModel
+import joblib
+
 
 from typing import Callable
 
@@ -122,10 +125,14 @@ def create_match_input_tensors(
 
         with torch.no_grad():
             team_a_pr_encoded = pr_vector(
-                torch.tensor(np.array(team_a_pr_feature), dtype=torch.float32)
+                torch.tensor(
+                    np.array(team_a_pr_feature, dtype=np.float32).reshape(1, -1)
+                )
             )
             team_b_pr_encoded = pr_vector(
-                torch.tensor(np.array(team_b_pr_feature), dtype=torch.float32)
+                torch.tensor(
+                    np.array(team_b_pr_feature, dtype=np.float32).reshape(1, -1)
+                )
             )
 
         team_a_pr_vector = team_a_pr_encoded.detach().cpu().numpy().ravel()
@@ -199,6 +206,43 @@ def create_pr_input_tensor(
     return team_pr_tensor, feature_names
 
 
+def get_power_rating_model(
+    transformed_data: DATAFRAME_BY_YEAR_TYPE,
+) -> tuple[Callable[[torch.Tensor], torch.Tensor], StandardScaler]:
+    scaler = StandardScaler()
+    yearly_team_pr_models: list[PowerRatingNeuralNetwork] = []
+    all_team_features: list[np.ndarray] = []
+    year_cache = {}
+
+    for year, data in transformed_data.items():
+        players_stats = data["players_stats"]["team_players_stats"]
+        matchups_stats = data["matches"]["teams_matchups_stats"]
+
+        pr_tensor, feature_names = create_pr_input_tensor(players_stats, matchups_stats)
+        mask = ~torch.isnan(pr_tensor).any(1)
+        pr_tensor = pr_tensor[mask]
+
+        year_cache[year] = dict(raw=pr_tensor, names=feature_names)
+        all_team_features.append(pr_tensor.numpy())
+
+    scaler.fit(np.vstack(all_team_features))
+
+    for year, cached in year_cache.items():
+        print("Training PR NN for year", year)
+        raw_tensor = cached["raw"]
+        names = cached["names"]
+
+        X_scaled = scaler.transform(raw_tensor.numpy())
+        X_scaled = torch.tensor(X_scaled, dtype=torch.float32)
+
+        net = PowerRatingNeuralNetwork(input_size=len(names))
+        net.train_model(X_scaled)
+        yearly_team_pr_models.append(net)
+
+    pr_model = ScaledPRModel(yearly_team_pr_models, scaler)
+    return pr_model
+
+
 def create_final_pr_model(
     models: list[PowerRatingNeuralNetwork],
 ) -> Callable[[torch.Tensor], torch.Tensor]:
@@ -229,50 +273,6 @@ def create_final_match_model(
             return torch.mean(probs, dim=0)
 
     return final_prediction
-
-
-def get_power_rating_model(
-    transformed_data: DATAFRAME_BY_YEAR_TYPE,
-) -> Callable[[torch.Tensor], torch.Tensor]:
-    scaler = StandardScaler()
-    yearly_team_pr_models = []
-    all_team_features = []
-    year_data_cache = {}
-
-    for year, year_data in transformed_data.items():
-        players_stats = year_data["players_stats"]["team_players_stats"]
-        matchups_data = year_data["matches"]["teams_matchups_stats"]
-
-        team_pr_tensor, feature_names = create_pr_input_tensor(
-            players_stats, matchups_data
-        )
-
-        mask = ~(torch.isnan(team_pr_tensor).any(dim=1))
-        team_pr_tensor = team_pr_tensor[mask]
-
-        year_data_cache[year] = {
-            "team_pr_tensor": team_pr_tensor,
-            "feature_names": feature_names,
-        }
-        all_team_features.append(team_pr_tensor.numpy())
-
-    combined_features = np.vstack(all_team_features)
-    scaler.fit(combined_features)
-    for year in transformed_data.keys():
-        print(f"Training for year: {year}")
-        team_pr_tensor = year_data_cache[year]["team_pr_tensor"]
-        feature_names = year_data_cache[year]["feature_names"]
-
-        team_pr_features_scaled = scaler.transform(team_pr_tensor.numpy())
-        team_pr_tensors = torch.tensor(team_pr_features_scaled, dtype=torch.float32)
-
-        team_pr_nn = PowerRatingNeuralNetwork(input_size=len(feature_names))
-        team_pr_nn.train_model(team_pr_tensors)
-
-        yearly_team_pr_models.append(team_pr_nn)
-
-    final_team_pr_model = create_final_pr_model(yearly_team_pr_models)
-    return final_team_pr_model
 
 
 def get_match_predictor_model(
