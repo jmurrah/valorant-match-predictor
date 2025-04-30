@@ -15,7 +15,6 @@ from valorant_match_predictor.main import (
 )
 from valorant_match_predictor.neural_networks import MatchPredictorNeuralNetwork
 
-# 1) PREPARE data for 2022+2023
 YEARS = ["2022", "2023"]
 dfs_by_year = read_in_data("data", YEARS)
 transformed = transform_data(dfs_by_year)
@@ -101,7 +100,6 @@ if __name__ == "__main__":
     study = optuna.create_study(directions=["minimize", "minimize", "minimize"])
     study.optimize(objective, n_trials=100)
 
-    # Print full Pareto front
     print("\nPareto‐optimal trials:")
     for t in study.best_trials:
         ll_val, bs_val, slope_err = t.values
@@ -110,12 +108,10 @@ if __name__ == "__main__":
             f"   log-loss={ll_val:.4f}, brier={bs_val:.4f}, |slope−1|={slope_err:.4f}"
         )
 
-    # Sort by calibration‐error, then log‐loss, then brier
     sorted_trials = sorted(
         study.best_trials, key=lambda t: (t.values[2], t.values[0], t.values[1])
     )
 
-    # Print top 3
     print("\nTop 3 trials by calibration:")
     for t in sorted_trials[:3]:
         ll_val, bs_val, slope_err = t.values

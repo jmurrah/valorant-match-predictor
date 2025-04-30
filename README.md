@@ -49,6 +49,9 @@ I like valorant!
     ```
     make scrape-matches
     ```
+    ```
+    make tune
+    ```
 
 ## Updating Dependencies
 ```

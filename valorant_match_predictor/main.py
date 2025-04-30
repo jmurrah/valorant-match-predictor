@@ -10,8 +10,6 @@ from scipy.stats import ttest_rel
 from scipy.stats import bootstrap
 
 import warnings
-
-# from numpy.lib.polynomial import RankWarning
 from numpy.polynomial.polyutils import RankWarning
 
 
@@ -245,8 +243,6 @@ def get_power_rating_model(
         players_stats = year_data["players_stats"]["team_players_stats"]
         matchups_data = year_data["matches"]["teams_matchups_stats"]
 
-        # print(matchups_data.head(10))
-        # break
         team_pr_tensor, feature_names = create_pr_input_tensor(
             players_stats, matchups_data
         )
@@ -341,75 +337,67 @@ def match_decimal_odds(
     return {team_a: odd_a, team_b: odd_b}
 
 
-def print_tables(header, y_true, p_model, p_book, vig_book_odds):
+def print_tables(
+    header: str,
+    y_true: np.ndarray,  # 0/1 outcomes (Team-A win)
+    p_model: np.ndarray,  # model P(Team-A)
+    p_book: np.ndarray,  # sportsbook P(Team-A)  (= 1/decimal_odds_A)
+    vig_book_odds: np.ndarray,  # sportsbook *juiced* decimal odds for Team-A
+    profit_model_raw: np.ndarray,  # $ profit per bet if book pays *fair* odds
+    profit_model_vig: np.ndarray,  # $ profit per bet if book pays *juiced* odds
+):
     print(header)
-    # Log-loss & Brier
-    log_model = log_loss(y_true, p_model, labels=[0, 1])
-    log_book = log_loss(y_true, p_book, labels=[0, 1])
-    brier_m = brier_score_loss(y_true, p_model)
-    brier_b = brier_score_loss(y_true, p_book)
+    ll_model = log_loss(y_true, p_model, labels=[0, 1])
+    ll_book = log_loss(y_true, p_book, labels=[0, 1])
+    br_model = brier_score_loss(y_true, p_model)
+    br_book = brier_score_loss(y_true, p_book)
 
-    # Calibration slope ≈ OLS slope of y_true on p̂ buckets
-    obs, pred = calibration_curve(y_true, p_model, n_bins=10)
-    slope_m = np.polyfit(pred, obs, 1)[0]
-    obs, pred = calibration_curve(y_true, p_book, n_bins=10)
-    slope_b = np.polyfit(pred, obs, 1)[0]
+    obs_m, pred_m = calibration_curve(y_true, p_model, n_bins=10)
+    slope_model = np.polyfit(pred_m, obs_m, 1)[0]
+    obs_b, pred_b = calibration_curve(y_true, p_book, n_bins=10)
+    slope_book = np.polyfit(pred_b, obs_b, 1)[0]
 
-    stakes = 1
-    profit_raw = np.where(y_true, (1 / p_book) - 1, -1)
-    profit_vig = np.where(y_true, vig_book_odds - 1, -1)
-    roi_raw = 100 * profit_raw.mean()
-    roi_vig = 100 * profit_vig.mean()
+    profit_book_raw = np.where(y_true, 1 / p_book - 1, -1)
+    profit_book_vig = np.where(y_true, vig_book_odds - 1, -1)
 
-    excess = profit_vig - profit_vig.mean()
-    sharpe_vig = profit_vig.mean() / excess.std(ddof=1)
+    roi_book_raw = 100 * profit_book_raw.mean()
+    roi_book_vig = 100 * profit_book_vig.mean()
+    roi_model_raw = 100 * profit_model_raw.mean()
+    roi_model_vig = 100 * profit_model_vig.mean()
 
-    # Kelly fraction f* = (bp – q) / b  where b=odds-1, q=1-p
-    b = vig_book_odds - 1
-    kelly_f = (p_model * b - (1 - p_model)) / b
-    # kelly_growth = np.mean(np.log1p(kelly_f * b * np.where(y_true, 1, -1)))
+    ev_book = profit_book_vig.mean()
+    ev_model = profit_model_vig.mean()
 
-    better_prob = (p_model > p_book) == y_true
-    fraction_winprob_beats_book = better_prob.mean()
-
-    t_stat, p_val_log = ttest_rel(
-        -np.log(np.where(y_true, p_model, 1 - p_model)),
-        -np.log(np.where(y_true, p_book, 1 - p_book)),
-    )
-    ci = bootstrap(
-        (profit_vig,), np.mean, confidence_level=0.95, method="bca"
-    ).confidence_interval
-
-    summary = pd.DataFrame(
+    df = pd.DataFrame(
         {
             "Metric": [
                 "Log-loss",
                 "Brier",
                 "Calibration slope",
-                "ROI (8% vig)",
-                "ROI (0% vig)",
+                "ROI (8 % vig)",
+                "ROI (0 % vig)",
                 "EV / bet",
             ],
             "Sportsbook": [
-                log_book,
-                brier_b,
-                slope_b,
-                roi_vig - roi_raw + roi_raw,
-                0,
-                0,
+                ll_book,
+                br_book,
+                slope_book,
+                roi_book_vig,
+                roi_book_raw,
+                ev_book,
             ],
             "NN Model": [
-                log_model,
-                brier_m,
-                slope_m,
-                roi_vig,
-                roi_raw,
-                profit_vig.mean(),
+                ll_model,
+                br_model,
+                slope_model,
+                roi_model_vig,
+                roi_model_raw,
+                ev_model,
             ],
         }
     )
-    summary["Δ"] = summary["NN Model"] - summary["Sportsbook"]
-    print(summary.to_markdown(index=False))
+    df["Δ"] = df["NN Model"] - df["Sportsbook"]
+    print(df.to_markdown(index=False))
 
 
 def compute_payouts_for_match(
@@ -419,26 +407,15 @@ def compute_payouts_for_match(
     winner: str,
     vig: float = 0.0,  # e.g. 0.08 for 8% vig
 ) -> dict[str, dict[str, float]]:
-    """
-    Returns $1 returns for both the bookmaker ("Thunderbird") and your model,
-    correctly applying an over-round (vig) to the book’s fair odds.
-    """
-
     raw = thunderbird_odds[matchup_url]
-
-    # 1) Convert raw fair odds → implied probabilities
     implied = {team: 1.0 / odds for team, odds in raw.items()}
 
     if vig > 0:
-        # 2) Add the over-round
         vigged_prob = {team: prob * (1 + vig) for team, prob in implied.items()}
-        # 3) Convert back to decimal odds
         actual_odds = {team: 1.0 / vigged_prob[team] for team in raw}
     else:
-        # No vig: offered odds == raw fair odds
         actual_odds = raw
 
-    # 4) Build payouts assuming a $1 stake
     th_payouts = {team: (actual_odds[team] if team == winner else -1.0) for team in raw}
     model_payouts = {
         team: (model_odds[team] if team == winner else -1.0) for team in model_odds
@@ -464,22 +441,25 @@ def train(
 
 
 def test(
-    pr_model: Callable[[torch.Tensor], torch.Tensor],
-    match_model: Callable[[torch.Tensor], torch.Tensor],
+    pr_model,
+    match_model,
     thunderbird_match_odds: dict[str, dict[str, float]],
     vig: float = 0.08,
 ):
     players_stats = load_scraped_teams_players_stats_from_csv()
     matchups_stats = load_scraped_teams_matchups_stats_from_csv()
+
     team_a_t, team_b_t, _ = create_match_input_tensors(
         pr_model, players_stats, matchups_stats
     )
     probs = match_model(team_a_t, team_b_t).squeeze(1).cpu().numpy()
 
-    # full‐sample arrays
+    # full sample metrics
     fs_y, fs_pm, fs_pb, fs_vig = [], [], [], []
-    # advantaged‐bets arrays
+
+    # advantaged-bet profits
     adv_y, adv_pm, adv_pb, adv_vig = [], [], [], []
+    profit_model_raw, profit_model_vig = [], []
 
     bankroll_raw = bankroll_vig = 0.0
     bets = 0
@@ -494,57 +474,58 @@ def test(
         ].iat[0]
         yA = 1 if winner == team_a else 0
 
+        # book odds
         raw_odds = thunderbird_match_odds[url]
         pA_book = 1.0 / raw_odds[team_a]
-        # juiced‐vig odds → implied probability
-        pA_book_vig = pA_book * (1 + vig)
-        vig_odds = {t: 1.0 / (1.0 / od * (1 + vig)) for t, od in raw_odds.items()}
 
-        # collect full‐sample metrics
+        # juiced odds
+        vig_odds = {t: od / (1 + vig) for t, od in raw_odds.items()}
+
+        # add to full-sample lists
         fs_y.append(yA)
         fs_pm.append(float(pA))
         fs_pb.append(pA_book)
         fs_vig.append(vig_odds[team_a])
 
-        # compute EVs
+        # EV for each side (with juiced odds)
         evA = pA * (vig_odds[team_a] - 1) - (1 - pA)
         evB = (1 - pA) * (vig_odds[team_b] - 1) - pA
 
-        # place bet if positive EV
+        # place a bet only if positive EV
         if evA > evB and evA > 0:
             pick, ev = team_a, evA
-            prob_pick = pA
-            book_pick = pA_book
-            vig_pick = vig_odds[team_a]
-            win_pick = winner == team_a
+            p_pick = pA
         elif evB > evA and evB > 0:
             pick, ev = team_b, evB
-            prob_pick = 1 - pA
-            book_pick = 1.0 / raw_odds[team_b]
-            vig_pick = vig_odds[team_b]
-            win_pick = winner == team_b
+            p_pick = 1 - pA
         else:
             continue
 
-        # collect advantaged‐bets metrics
-        adv_y.append(int(win_pick))
-        adv_pm.append(prob_pick)
-        adv_pb.append(book_pick)
-        adv_vig.append(vig_pick)
-
         bets += 1
         ev_vals.append(ev)
-        if win_pick:
-            bankroll_raw += raw_odds[pick] - 1
-            bankroll_vig += vig_pick - 1
-        else:
-            bankroll_raw -= 1
-            bankroll_vig -= 1
+        win = pick == winner
 
-    avg_ev = sum(ev_vals) / bets if bets else 0.0
-    roi_raw = 100 * bankroll_raw / bets if bets else 0.0
-    roi_vig = 100 * bankroll_vig / bets if bets else 0.0
-    edge_loss = 100 * (bankroll_raw - bankroll_vig) / bets if bets else 0.0
+        # profits from the sportsbook prices
+        profit_raw = (raw_odds[pick] - 1) if win else -1
+        profit_vig = (vig_odds[pick] - 1) if win else -1
+
+        bankroll_raw += profit_raw
+        bankroll_vig += profit_vig
+
+        # store per-bet arrays for metrics
+        adv_y.append(int(win))
+        adv_pm.append(p_pick)
+        adv_pb.append(1 / raw_odds[pick])
+        adv_vig.append(vig_odds[pick])
+        model_odds = 1 / p_pick  # p_pick is model prob on the side we bet
+        profit_model_raw.append(model_odds - 1 if win else -1)
+        profit_model_vig.append(model_odds - 1 if win else -1)  # same (no extra vig)
+
+    # headline back-test numbers
+    avg_ev = np.mean(ev_vals) if bets else 0
+    roi_raw = 100 * bankroll_raw / bets if bets else 0
+    roi_vig = 100 * bankroll_vig / bets if bets else 0
+    edge = 100 * (bankroll_raw - bankroll_vig) / bets if bets else 0
 
     print("\n--- ADVANTAGED BETS Backtest ---")
     print(f"Bets placed:                      {bets}")
@@ -553,24 +534,31 @@ def test(
         f"Site pays RAW odds (vig 0%):      ${bankroll_raw:+.2f} | ROI {roi_raw:+.1f}%"
     )
     print(
-        f"Site pays JUICED odds (vig {vig*100:.0f}%):   ${bankroll_vig:+.2f} | ROI {roi_vig:+.1f}%"
+        f"Site pays JUICED odds (vig {vig*100:.0f}%):   "
+        f"${bankroll_vig:+.2f} | ROI {roi_vig:+.1f}%"
     )
-    print(f"Edge lost to vig:                 {edge_loss:+.1f}% of stakes")
+    print(f"Edge lost to vig:                 {edge:+.1f}% of stakes")
+
+    # advantage slice
     print_tables(
-        "Advantaged‐Bets Scoring",
+        "Advantaged-Bets Scoring",
         np.array(adv_y, dtype=int),
         np.array(adv_pm),
         np.array(adv_pb),
         np.array(adv_vig),
+        np.array(profit_model_raw),
+        np.array(profit_model_vig),
     )
 
-    print("\n--- FULL-SAMPLE Proper-Scoring Metrics ---")
+    # full-sample
     print_tables(
-        "Full-Sample Scoring",
+        "\n--- FULL-SAMPLE Proper-Scoring Metrics ---",
         np.array(fs_y, dtype=int),
         np.array(fs_pm),
         np.array(fs_pb),
         np.array(fs_vig),
+        profit_model_raw=np.zeros_like(fs_y, dtype=float),
+        profit_model_vig=np.zeros_like(fs_y, dtype=float),
     )
 
 

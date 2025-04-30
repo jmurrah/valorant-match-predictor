@@ -173,7 +173,6 @@ class PowerRatingNeuralNetwork(nn.Module):
             if epoch % print_every == 0:
                 print(f"Epoch {epoch}/{epochs} — Recon Loss: {avg_loss:.4f}")
 
-        # restore best weights if early‐stopped
         if best_state is not None:
             self.load_state_dict(best_state)
         self.eval()

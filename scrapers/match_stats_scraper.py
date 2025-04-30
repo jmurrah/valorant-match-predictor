@@ -13,25 +13,23 @@ from helper import (
     REGIONAL_TOURNAMENTS,
 )
 
-from requests.adapters import HTTPAdapter  # new
-from urllib3.util.retry import Retry  # new
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
-# create a Session that will retry on connect/read failures (including SSL handshake timeouts)
-session = requests.Session()  # new
-retry_strategy = Retry(  # new
-    total=3,  # total retry attempts
-    connect=3,  # retry on connection failures (e.g. handshake timeouts)
-    read=3,  # retry on read timeouts
-    backoff_factor=1,  # wait 1s, 2s, 4s between retries
-    status_forcelist=[429, 500, 502, 503, 504],  # retry on these HTTP status codes
+session = requests.Session()
+retry_strategy = Retry(
+    total=3,
+    connect=3,
+    read=3,
+    backoff_factor=1,
+    status_forcelist=[429, 500, 502, 503, 504],
     allowed_methods=["HEAD", "GET", "OPTIONS"],
 )
-adapter = HTTPAdapter(max_retries=retry_strategy)  # new
-session.mount("https://", adapter)  # new
-session.mount("http://", adapter)  # new
+adapter = HTTPAdapter(max_retries=retry_strategy)
+session.mount("https://", adapter)
+session.mount("http://", adapter)
 
-# Monkey-patch requests.get so all calls use our retrying session:
-requests.get = session.get  # new
+requests.get = session.get
 
 
 def parse_match_date(soup: BeautifulSoup):
@@ -212,7 +210,6 @@ def get_prev_n_match_urls(
     original = original_match_url.rstrip("/")
     team_match_page = get_team_match_page(team_page)
 
-    # simple retry loop around the requests.get
     for attempt in range(3):
         try:
             resp = requests.get(team_match_page, headers=HEADERS, timeout=15)
@@ -267,7 +264,6 @@ def aggregate_prev_match_map_stats(match_urls: list[str], team_name: str):
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, "html.parser")
 
-        # skip any match that failed to parse
         match_data = parse_match(soup)
         if match_data is None:
             print(f"⚠️ Skipping map stats for {match_url}")
@@ -360,7 +356,6 @@ def aggregate_prev_matches_player_stats(
     return df
 
 
-# store the transformed data in a csv
 def create_teams_matchups_stats_df(
     match_url,
     team_a,
@@ -393,10 +388,6 @@ def create_teams_matchups_stats_df(
 
 
 def get_match_winner(map_stats: list[dict]):
-    # [
-    # {'map_name': 'Lotus', 'team_a_name': 'Sentinels', 'team_a_score': 13, 'team_b_name': 'NRG Esports', 'team_b_score': 8, 'picked_by': 'NRG Esports'},
-    # {'map_name': 'Sunset', 'team_a_name': 'Sentinels', 'team_a_score': 14, 'team_b_name': 'NRG Esports', 'team_b_score': 12, 'picked_by': 'Sentinels'}
-    # ]
     team_a_map_wins = team_b_map_wins = 0
     for m in map_stats:
         if m["team_a_score"] > m["team_b_score"]:
@@ -411,9 +402,6 @@ def get_match_winner(map_stats: list[dict]):
     )
 
 
-# https://www.vlr.gg/281026/kr-esports-vs-leviat-n-superdome-2023-colombia-ubsf
-# ⚠️ Skipping match (error scraping)
-# https://www.vlr.gg/280446/kr-esports-vs-leviat-n-argentina-game-show-cup-2023-showmatch
 if __name__ == "__main__":
     # NOTE: a lot of matches are scraped multiple times. need to clean this up...
     set_display_options()
