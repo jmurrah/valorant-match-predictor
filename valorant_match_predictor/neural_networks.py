@@ -37,7 +37,7 @@ class MatchPredictorNeuralNetwork(nn.Module):
         team_a_features: torch.Tensor,
         team_b_features: torch.Tensor,
         win_labels: torch.Tensor,
-        epochs: int = 100,
+        epochs: int = 1000,
         learning_rate: float = 0.001,
         batch_size: int = 16,
     ):
@@ -117,7 +117,7 @@ class PowerRatingNeuralNetwork(nn.Module):
     def train_model(
         self,
         feature_tensor: torch.Tensor,
-        epochs: int = 100,
+        epochs: int = 1000,
         learning_rate: float = 0.001,
         batch_size: int = 16,
         print_every: int = 10,
@@ -150,13 +150,6 @@ class PowerRatingNeuralNetwork(nn.Module):
                 print(f"Epoch {epoch}/{epochs} — Recon Loss: {avg:.4f}")
 
     def predict(self, feature_tensor: torch.Tensor) -> float:
-        """
-        Compute the unsupervised power rating for a new team.
-        Args:
-            feature_tensor: Tensor of shape (1, input_size).
-        Returns:
-            Scalar latent code.
-        """
         self.eval()
         with torch.no_grad():
             z = self.encode(feature_tensor)
