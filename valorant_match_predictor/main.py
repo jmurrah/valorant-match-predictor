@@ -455,7 +455,7 @@ def train(
     return pr_model, match_predictor_model
 
 
-def test_advantaged(
+def test(
     pr_model: Callable[[torch.Tensor], torch.Tensor],
     match_model: Callable[[torch.Tensor], torch.Tensor],
     thunderbird_match_odds: dict[str, dict[str, float]],
@@ -468,59 +468,67 @@ def test_advantaged(
     )
     probs = match_model(team_a_t, team_b_t).squeeze(1).cpu().numpy()
 
-    bankroll_raw = 0.0
-    bankroll_vig = 0.0
+    # full‐sample arrays
+    fs_y, fs_pm, fs_pb, fs_vig = [], [], [], []
+    # advantaged‐bets arrays
+    adv_y, adv_pm, adv_pb, adv_vig = [], [], [], []
+
+    bankroll_raw = bankroll_vig = 0.0
     bets = 0
     ev_vals = []
-    y_true, p_model, p_book, p_book_vig = [], [], [], []
-    vig_book_odds = []
 
     urls = matchups_stats["Matchup URL"].unique()
-    for url, p in zip(urls, probs):
-        team_a, team_b = (
-            matchups_stats.loc[matchups_stats["Matchup URL"] == url, "Matchup"]
-            .iat[0]
-            .split("_vs_")
-        )
-        raw_odds = thunderbird_match_odds[url]
-
-        # probabilitiy calcs
-        p_model.append(float(p))
-        p_a_book = 1.0 / raw_odds[team_a]
-        p_book.append(p_a_book)
-        p_a_book_vig = p_a_book * (1 + vig)
-
-        if vig:
-            probs_no_vig = {t: 1 / od for t, od in raw_odds.items()}
-            probs_vig = {t: q * (1 + vig) for t, q in probs_no_vig.items()}
-            vig_odds = {t: 1 / q for t, q in probs_vig.items()}
-        else:
-            vig_odds = raw_odds
-
-        vig_book_odds.append(vig_odds[team_a])
-        p_book_vig.append(p_a_book_vig)
-
+    for url, pA in zip(urls, probs):
+        row = matchups_stats[matchups_stats["Matchup URL"] == url].iloc[0]
+        team_a, team_b = row["Matchup"].split("_vs_")
         winner = players_stats.loc[
             players_stats["Matchup URL"] == url, "Won Match"
         ].iat[0]
-        y_true.append(1 if winner == team_a else 0)
+        yA = 1 if winner == team_a else 0
 
-        ev_a = p * (vig_odds[team_a] - 1) - (1 - p)
-        ev_b = (1 - p) * (vig_odds[team_b] - 1) - p
+        raw_odds = thunderbird_match_odds[url]
+        pA_book = 1.0 / raw_odds[team_a]
+        # juiced‐vig odds → implied probability
+        pA_book_vig = pA_book * (1 + vig)
+        vig_odds = {t: 1.0 / (1.0 / od * (1 + vig)) for t, od in raw_odds.items()}
 
-        if ev_a > ev_b and ev_a > 0:
-            pick, ev_pick = team_a, ev_a
-        elif ev_b > ev_a and ev_b > 0:
-            pick, ev_pick = team_b, ev_b
+        # collect full‐sample metrics
+        fs_y.append(yA)
+        fs_pm.append(float(pA))
+        fs_pb.append(pA_book)
+        fs_vig.append(vig_odds[team_a])
+
+        # compute EVs
+        evA = pA * (vig_odds[team_a] - 1) - (1 - pA)
+        evB = (1 - pA) * (vig_odds[team_b] - 1) - pA
+
+        # place bet if positive EV
+        if evA > evB and evA > 0:
+            pick, ev = team_a, evA
+            prob_pick = pA
+            book_pick = pA_book
+            vig_pick = vig_odds[team_a]
+            win_pick = winner == team_a
+        elif evB > evA and evB > 0:
+            pick, ev = team_b, evB
+            prob_pick = 1 - pA
+            book_pick = 1.0 / raw_odds[team_b]
+            vig_pick = vig_odds[team_b]
+            win_pick = winner == team_b
         else:
             continue
 
-        bets += 1
-        ev_vals.append(ev_pick)
+        # collect advantaged‐bets metrics
+        adv_y.append(int(win_pick))
+        adv_pm.append(prob_pick)
+        adv_pb.append(book_pick)
+        adv_vig.append(vig_pick)
 
-        if pick == winner:
+        bets += 1
+        ev_vals.append(ev)
+        if win_pick:
             bankroll_raw += raw_odds[pick] - 1
-            bankroll_vig += vig_odds[pick] - 1
+            bankroll_vig += vig_pick - 1
         else:
             bankroll_raw -= 1
             bankroll_vig -= 1
@@ -528,9 +536,9 @@ def test_advantaged(
     avg_ev = sum(ev_vals) / bets if bets else 0.0
     roi_raw = 100 * bankroll_raw / bets if bets else 0.0
     roi_vig = 100 * bankroll_vig / bets if bets else 0.0
-    edge_loss = 100 * (bankroll_raw - bankroll_vig) / bets
+    edge_loss = 100 * (bankroll_raw - bankroll_vig) / bets if bets else 0.0
 
-    print("\n--- ADVANTAGED BETTING Results ---")
+    print("\n--- ADVANTAGED BETS Backtest ---")
     print(f"Bets placed:                      {bets}")
     print(f"Average model EV:                 {avg_ev:+.3f}")
     print(
@@ -541,18 +549,20 @@ def test_advantaged(
     )
     print(f"Edge lost to vig:                 {edge_loss:+.1f}% of stakes")
     print_tables(
-        "ADVANTAGED BETTING Scoring Metrics",
-        np.array(y_true, dtype=int),
-        np.array(p_model),
-        np.array(p_book),
-        np.array(vig_book_odds),
+        "Advantaged‐Bets Scoring",
+        np.array(adv_y, dtype=int),
+        np.array(adv_pm),
+        np.array(adv_pb),
+        np.array(adv_vig),
     )
+
+    print("\n--- FULL-SAMPLE Proper-Scoring Metrics ---")
     print_tables(
-        "Full-Sample Scoring Metrics",
-        np.array(y_true, dtype=int),
-        np.array(p_model),
-        np.array(p_book),
-        np.array(vig_book_odds),
+        "Full-Sample Scoring",
+        np.array(fs_y, dtype=int),
+        np.array(fs_pm),
+        np.array(fs_pb),
+        np.array(fs_vig),
     )
 
 
@@ -560,4 +570,4 @@ if __name__ == "__main__":
     set_display_options()
     pr_model, match_model = train(years=["2022", "2023"])
     thunderbird_match_odds = load_year_thunderbird_match_odds_from_csv("2024")
-    test_advantaged(pr_model, match_model, thunderbird_match_odds)
+    test(pr_model, match_model, thunderbird_match_odds)
