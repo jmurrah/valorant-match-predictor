@@ -325,6 +325,82 @@ def match_decimal_odds(
     return {team_a: odd_a, team_b: odd_b}
 
 
+def print_tables(y_true, p_model, p_book, vig_book_odds):
+    from sklearn.metrics import log_loss, brier_score_loss
+    from sklearn.calibration import calibration_curve
+    import numpy as np
+    from scipy.stats import ttest_rel
+    from scipy.stats import bootstrap
+
+    # Log-loss & Brier
+    log_model = log_loss(y_true, p_model, labels=[0, 1])
+    log_book = log_loss(y_true, p_book, labels=[0, 1])
+    brier_m = brier_score_loss(y_true, p_model)
+    brier_b = brier_score_loss(y_true, p_book)
+
+    # Calibration slope ≈ OLS slope of y_true on p̂ buckets
+    obs, pred = calibration_curve(y_true, p_model, n_bins=10)
+    slope_m = np.polyfit(pred, obs, 1)[0]
+    obs, pred = calibration_curve(y_true, p_book, n_bins=10)
+    slope_b = np.polyfit(pred, obs, 1)[0]
+
+    stakes = 1
+    profit_raw = np.where(y_true, (1 / p_book) - 1, -1)
+    profit_vig = np.where(y_true, vig_book_odds - 1, -1)
+    roi_raw = 100 * profit_raw.mean()
+    roi_vig = 100 * profit_vig.mean()
+
+    excess = profit_vig - profit_vig.mean()
+    sharpe_vig = profit_vig.mean() / excess.std(ddof=1)
+
+    # Kelly fraction f* = (bp – q) / b  where b=odds-1, q=1-p
+    b = vig_book_odds - 1
+    kelly_f = (p_model * b - (1 - p_model)) / b
+    # kelly_growth = np.mean(np.log1p(kelly_f * b * np.where(y_true, 1, -1)))
+
+    better_prob = (p_model > p_book) == y_true
+    fraction_winprob_beats_book = better_prob.mean()
+
+    t_stat, p_val_log = ttest_rel(
+        -np.log(np.where(y_true, p_model, 1 - p_model)),
+        -np.log(np.where(y_true, p_book, 1 - p_book)),
+    )
+    ci = bootstrap(
+        (profit_vig,), np.mean, confidence_level=0.95, method="bca"
+    ).confidence_interval
+
+    summary = pd.DataFrame(
+        {
+            "Metric": [
+                "Log-loss",
+                "Brier",
+                "Calibration slope",
+                "ROI (8% vig)",
+                "ROI (0% vig)",
+                "EV / bet",
+            ],
+            "Sportsbook": [
+                log_book,
+                brier_b,
+                slope_b,
+                roi_vig - roi_raw + roi_raw,
+                0,
+                0,
+            ],
+            "NN Model": [
+                log_model,
+                brier_m,
+                slope_m,
+                roi_vig,
+                roi_raw,
+                profit_vig.mean(),
+            ],
+        }
+    )
+    summary["Δ"] = summary["NN Model"] - summary["Sportsbook"]
+    print(summary.to_markdown(index=False))
+
+
 def compute_payouts_for_match(
     matchup_url: str,
     thunderbird_odds: dict[str, dict[str, float]],
@@ -376,123 +452,6 @@ def train(
     return pr_model, match_predictor_model
 
 
-# def test_assumed_winners(
-#     pr_model: Callable[[torch.Tensor], torch.Tensor],
-#     match_model: Callable[[torch.Tensor], torch.Tensor],
-#     thunderbird_match_odds: dict[str, dict[str, float]] = None,
-# ):
-#     players_stats = load_scraped_teams_players_stats_from_csv()
-#     matchups_stats = load_scraped_teams_matchups_stats_from_csv()
-
-#     team_a_tensor, team_b_tensor, _ = create_match_input_tensors(
-#         pr_model, players_stats, matchups_stats
-#     )
-
-#     with torch.no_grad():
-#         prob_tensor = match_model(team_a_tensor, team_b_tensor).squeeze(1)
-
-#     model_payout = thunderbird_payout = 0
-#     probs = prob_tensor.cpu().numpy()
-#     for matchup_url, p in zip(matchups_stats["Matchup URL"].unique(), probs):
-#         matchup_data = matchups_stats[matchups_stats["Matchup URL"] == matchup_url]
-#         team_a, team_b = matchup_data["Matchup"].iloc[0].split("_vs_")
-#         model_pred = match_decimal_odds(team_a, team_b, float(p))
-
-#         winner = players_stats[players_stats["Matchup URL"] == matchup_url][
-#             "Won Match"
-#         ].iloc[0]
-
-#         payouts = compute_payouts_for_match(
-#             matchup_url, thunderbird_match_odds, model_pred, winner
-#         )
-
-#         model_payout += payouts["Model"][winner]
-#         thunderbird_payout += payouts["Thunderbird"][winner]
-
-#     print("--- Results! ($1 bet per match) ---")
-#     print(f"Thunderbird Payout: ${thunderbird_payout:.2f}")
-#     print(f"Model Payout: ${model_payout:.2f}")
-#     print(f"Expected Return If Bets Placed: ${(model_payout - thunderbird_payout):.2f}")
-
-
-# def test_advantaged(
-#     pr_model: Callable[[torch.Tensor], torch.Tensor],
-#     match_model: Callable[[torch.Tensor], torch.Tensor],
-#     thunderbird_match_odds: dict[str, dict[str, float]] = None,
-#     vig: float = 0.00,  # 8% overround by default
-# ):
-#     players_stats = load_scraped_teams_players_stats_from_csv()
-#     matchups_stats = load_scraped_teams_matchups_stats_from_csv()
-
-#     team_a_tensor, team_b_tensor, _ = create_match_input_tensors(
-#         pr_model, players_stats, matchups_stats
-#     )
-#     with torch.no_grad():
-#         prob_tensor = match_model(team_a_tensor, team_b_tensor).squeeze(1)
-
-#     bankroll = 0.0
-#     bets_placed = 0
-#     ev_values = []
-
-#     probs = prob_tensor.cpu().numpy()
-#     for matchup_url, p in zip(matchups_stats["Matchup URL"].unique(), probs):
-#         df = matchups_stats[matchups_stats["Matchup URL"] == matchup_url]
-#         team_a, team_b = df["Matchup"].iloc[0].split("_vs_")
-#         model_pred = match_decimal_odds(team_a, team_b, float(p))
-
-#         raw = thunderbird_match_odds[matchup_url]
-#         if vig:
-#             prob_no_vig = {t: 1.0 / o for t, o in raw.items()}
-#             prob_vig = {t: q * (1 + vig) for t, q in prob_no_vig.items()}
-#             book_odds = {t: 1.0 / q for t, q in prob_vig.items()}
-#         else:
-#             book_odds = raw
-
-#         odd_a = book_odds[team_a]
-#         odd_b = book_odds[team_b]
-
-#         ev_a = p * (odd_a - 1) - (1 - p)
-#         ev_b = (1 - p) * (odd_b - 1) - p
-
-#         # Pick the side with the higher positive EV
-#         if ev_a > ev_b and ev_a > 0:
-#             pick, ev_pick = team_a, ev_a
-#         elif ev_b > ev_a and ev_b > 0:
-#             pick, ev_pick = team_b, ev_b
-#         else:
-#             continue
-
-#         bets_placed += 1
-#         ev_values.append(ev_pick)
-#         winner = players_stats[players_stats["Matchup URL"] == matchup_url][
-#             "Won Match"
-#         ].iloc[0]
-
-#         payouts = compute_payouts_for_match(
-#             matchup_url=matchup_url,
-#             thunderbird_odds=thunderbird_match_odds,
-#             model_odds=model_pred,
-#             winner=winner,
-#             vig=vig,
-#         )
-#         model_ret = payouts["Model"][pick]
-#         book_ret = payouts["Thunderbird"][pick]
-#         model_payout += model_ret
-#         thunderbird_payout += book_ret
-
-#     net_profit = model_payout - thunderbird_payout
-#     roi = (net_profit / bets_placed * 100) if bets_placed else 0.0
-#     avg_ev = (sum(ev_values) / bets_placed) if bets_placed else 0.0
-
-#     print(f"--- Expected Value Bets Only (vig={vig*100:.0f}%) ---")
-#     print(f"Bets Placed:         {bets_placed}")
-#     print(f"Avg. EV per Bet:     {avg_ev:.3f}")
-#     print(f"Thunderbird Payout:  ${thunderbird_payout:.2f}")
-#     print(f"Our Model Payout:    ${model_payout:.2f}")
-#     print(f"Net Profit:          ${net_profit:.2f}")
-#     print(f"ROI:                 {roi:.1f}%")
-
-
 def test_advantaged(
     pr_model: Callable[[torch.Tensor], torch.Tensor],
     match_model: Callable[[torch.Tensor], torch.Tensor],
@@ -510,21 +469,38 @@ def test_advantaged(
     bankroll_vig = 0.0
     bets = 0
     ev_vals = []
+    y_true, p_model, p_book, p_book_vig = [], [], [], []
+    vig_book_odds = []
 
-    for url, p in zip(matchups_stats["Matchup URL"].unique(), probs):
+    urls = matchups_stats["Matchup URL"].unique()
+    for url, p in zip(urls, probs):
         team_a, team_b = (
             matchups_stats.loc[matchups_stats["Matchup URL"] == url, "Matchup"]
             .iat[0]
             .split("_vs_")
         )
-
         raw_odds = thunderbird_match_odds[url]
+
+        # probabilitiy calcs
+        p_model.append(float(p))
+        p_a_book = 1.0 / raw_odds[team_a]
+        p_book.append(p_a_book)
+        p_a_book_vig = p_a_book * (1 + vig)
+
         if vig:
             probs_no_vig = {t: 1 / od for t, od in raw_odds.items()}
             probs_vig = {t: q * (1 + vig) for t, q in probs_no_vig.items()}
             vig_odds = {t: 1 / q for t, q in probs_vig.items()}
         else:
             vig_odds = raw_odds
+
+        vig_book_odds.append(vig_odds[team_a])
+        p_book_vig.append(p_a_book_vig)
+
+        winner = players_stats.loc[
+            players_stats["Matchup URL"] == url, "Won Match"
+        ].iat[0]
+        y_true.append(1 if winner == team_a else 0)
 
         ev_a = p * (vig_odds[team_a] - 1) - (1 - p)
         ev_b = (1 - p) * (vig_odds[team_b] - 1) - p
@@ -538,9 +514,6 @@ def test_advantaged(
 
         bets += 1
         ev_vals.append(ev_pick)
-        winner = players_stats.loc[
-            players_stats["Matchup URL"] == url, "Won Match"
-        ].iat[0]
 
         if pick == winner:
             bankroll_raw += raw_odds[pick] - 1
@@ -564,6 +537,12 @@ def test_advantaged(
         f"Site pays JUICED odds (vig {vig*100:.0f}%):   ${bankroll_vig:+.2f} | ROI {roi_vig:+.1f}%"
     )
     print(f"Edge lost to vig:                 {edge_loss:+.1f}% of stakes")
+    print_tables(
+        np.array(y_true, dtype=int),
+        np.array(p_model),
+        np.array(p_book),
+        np.array(vig_book_odds),
+    )
 
 
 if __name__ == "__main__":
