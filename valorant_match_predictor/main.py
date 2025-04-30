@@ -82,16 +82,16 @@ def create_match_input_tensors(
     pr_vector: Callable[[torch.Tensor], torch.Tensor],
     players_stats: pd.DataFrame,
     matchups_data: pd.DataFrame,
+    scaler: StandardScaler,
+    scaler_h2h: StandardScaler,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    team_a_features = []
-    team_b_features = []
-    win_probabilities = []
 
-    using_matchup_url = False
-    matchups = matchups_data["Matchup"].unique()
-    if "Matchup URL" in matchups_data:
-        using_matchup_url = True
-        matchups = matchups_data["Matchup URL"].unique()
+    team_a_features, team_b_features, win_probabilities = [], [], []
+
+    using_matchup_url = "Matchup URL" in matchups_data
+    matchups = (
+        matchups_data["Matchup URL"] if using_matchup_url else matchups_data["Matchup"]
+    ).unique()
 
     for matchup in matchups:
         if using_matchup_url:
@@ -101,65 +101,57 @@ def create_match_input_tensors(
             matchup_data = matchups_data[matchups_data["Matchup"] == matchup]
             team_a, team_b = matchup.split("_vs_")
 
-        team_a_players_stats = players_stats[players_stats["Teams"] == team_a]
-        team_b_players_stats = players_stats[players_stats["Teams"] == team_b]
-        team_a_vs_b_stats = matchup_data[
+        # ---  gather raw stats  ------------------------------------------------
+        ta_players = players_stats[players_stats["Teams"] == team_a]
+        tb_players = players_stats[players_stats["Teams"] == team_b]
+
+        ta_vs_b = matchup_data[
             (matchup_data["Teams"] == "A") & (matchup_data["Opponent"] == "B")
         ]
-        team_b_vs_a_stats = matchup_data[
+        tb_vs_a = matchup_data[
             (matchup_data["Teams"] == "B") & (matchup_data["Opponent"] == "A")
         ]
-        team_a_vs_others_stats = matchup_data[
+
+        ta_vs_oth = matchup_data[
             (matchup_data["Teams"] == "A") & (matchup_data["Opponent"] == "Others")
         ]
-        team_b_vs_others_stats = matchup_data[
+        tb_vs_oth = matchup_data[
             (matchup_data["Teams"] == "B") & (matchup_data["Opponent"] == "Others")
         ]
 
-        team_a_pr_feature = create_team_pr_feature(
-            team_a_players_stats, team_a_vs_others_stats
-        )
-        team_b_pr_feature = create_team_pr_feature(
-            team_b_players_stats, team_b_vs_others_stats
-        )
+        # ---  8-dim player/team features  -------------------------------------
+        feat_pr_a = create_team_pr_feature(ta_players, ta_vs_oth)
+        feat_pr_b = create_team_pr_feature(tb_players, tb_vs_oth)
 
         with torch.no_grad():
-            team_a_pr_encoded = pr_vector(
-                torch.tensor(
-                    np.array(team_a_pr_feature, dtype=np.float32).reshape(1, -1)
-                )
+            enc_a = pr_vector(
+                torch.tensor(np.array(feat_pr_a, dtype=np.float32).reshape(1, -1))
             )
-            team_b_pr_encoded = pr_vector(
-                torch.tensor(
-                    np.array(team_b_pr_feature, dtype=np.float32).reshape(1, -1)
-                )
+            enc_b = pr_vector(
+                torch.tensor(np.array(feat_pr_b, dtype=np.float32).reshape(1, -1))
             )
 
-        team_a_pr_vector = team_a_pr_encoded.detach().cpu().numpy().ravel()
-        team_b_pr_vector = team_b_pr_encoded.detach().cpu().numpy().ravel()
+        emb_a = enc_a.cpu().numpy().ravel()  # (latent_dim,)
+        emb_b = enc_b.cpu().numpy().ravel()
 
-        team_a_feature = np.array(create_team_feature(team_a_vs_b_stats))
-        team_b_feature = np.array(create_team_feature(team_b_vs_a_stats))
-        team_a_features.append(
-            np.concatenate([team_a_pr_vector, team_a_feature], axis=0)
-        )
-        team_b_features.append(
-            np.concatenate([team_b_pr_vector, team_b_feature], axis=0)
-        )
+        # ---  2 head-to-head percentage features  -----------------------------
+        pct_a = np.array(create_team_feature(ta_vs_b))  # shape (2,)
+        pct_b = np.array(create_team_feature(tb_vs_a))
 
-        win_probabilities.append(team_a_vs_b_stats["Map Win Pct"].values[0])
+        # scale with the SAME StandardScaler (mean/std fitted over all seasons)
+        pct_a_scaled = scaler_h2h.transform(pct_a.reshape(1, -1)).ravel()
+        pct_b_scaled = scaler_h2h.transform(pct_b.reshape(1, -1)).ravel()
 
-    team_a_tensor = torch.from_numpy(
-        np.stack(team_a_features, axis=0).astype(np.float32)
-    )
-    team_b_tensor = torch.from_numpy(
-        np.stack(team_b_features, axis=0).astype(np.float32)
-    )
-    win_probabilities_tensor = torch.tensor(
-        win_probabilities, dtype=torch.float32
-    ).unsqueeze(1)
+        # ---  concat and collect  ---------------------------------------------
+        team_a_features.append(np.concatenate([emb_a, pct_a_scaled], axis=0))
+        team_b_features.append(np.concatenate([emb_b, pct_b_scaled], axis=0))
+        win_probabilities.append(ta_vs_b["Map Win Pct"].values[0])
 
-    return team_a_tensor, team_b_tensor, win_probabilities_tensor
+    team_a_tensor = torch.from_numpy(np.stack(team_a_features).astype(np.float32))
+    team_b_tensor = torch.from_numpy(np.stack(team_b_features).astype(np.float32))
+    win_prob_tensor = torch.tensor(win_probabilities, dtype=torch.float32).unsqueeze(1)
+
+    return team_a_tensor, team_b_tensor, win_prob_tensor
 
 
 def create_pr_input_tensor(
@@ -210,6 +202,7 @@ def get_power_rating_model(
     transformed_data: DATAFRAME_BY_YEAR_TYPE,
 ) -> tuple[Callable[[torch.Tensor], torch.Tensor], StandardScaler]:
     scaler = StandardScaler()
+    scaler_h2h = StandardScaler()
     yearly_team_pr_models: list[PowerRatingNeuralNetwork] = []
     all_team_features: list[np.ndarray] = []
     year_cache = {}
@@ -226,6 +219,7 @@ def get_power_rating_model(
         all_team_features.append(pr_tensor.numpy())
 
     scaler.fit(np.vstack(all_team_features))
+    scaler_h2h.fit(np.vstack(all_team_features))
 
     for year, cached in year_cache.items():
         print("Training PR NN for year", year)
@@ -239,8 +233,16 @@ def get_power_rating_model(
         net.train_model(X_scaled)
         yearly_team_pr_models.append(net)
 
+    all_h2h = []
+    for data in transformed_data.values():
+        m = data["matches"]["teams_matchups_stats"]
+        for side in [("A", "B"), ("B", "A")]:
+            rows = m[(m["Teams"] == side[0]) & (m["Opponent"] == side[1])]
+            all_h2h.append(rows[["Round Win Pct", "Map Win Pct"]].values)
+    scaler_h2h.fit(np.vstack(all_h2h))
+
     pr_model = ScaledPRModel(yearly_team_pr_models, scaler)
-    return pr_model
+    return pr_model, scaler, scaler_h2h
 
 
 def create_final_pr_model(
@@ -278,6 +280,8 @@ def create_final_match_model(
 def get_match_predictor_model(
     pr_model: Callable[[torch.Tensor], torch.Tensor],
     transformed_data: DATAFRAME_BY_YEAR_TYPE,
+    scaler,
+    scaler_h2h,
 ) -> Callable[[torch.Tensor], torch.Tensor]:
     yearly_match_models = []
     for year, year_data in transformed_data.items():
@@ -285,7 +289,7 @@ def get_match_predictor_model(
         matchups_data = year_data["matches"]["teams_matchups_stats"]
 
         team_a_tensor, team_b_tensor, win_probabilities = create_match_input_tensors(
-            pr_model, players_stats, matchups_data
+            pr_model, players_stats, matchups_data, scaler, scaler_h2h
         )
 
         combined_mask = ~(torch.isnan(team_a_tensor).any(dim=1)) & ~(
@@ -434,23 +438,27 @@ def train(
 ]:
     dataframes_by_year = read_in_data("data", years)
     transformed_data = transform_data(dataframes_by_year)
-    pr_model = get_power_rating_model(transformed_data)
-    match_predictor_model = get_match_predictor_model(pr_model, transformed_data)
+    pr_model, scaler, scaler_h2h = get_power_rating_model(transformed_data)
+    match_predictor_model = get_match_predictor_model(
+        pr_model, transformed_data, scaler, scaler_h2h
+    )
 
-    return pr_model, match_predictor_model
+    return pr_model, match_predictor_model, scaler, scaler_h2h
 
 
 def test(
     pr_model,
     match_model,
     thunderbird_match_odds: dict[str, dict[str, float]],
+    scaler,
+    scaler_h2h,
     vig: float = 0.08,
 ):
     players_stats = load_scraped_teams_players_stats_from_csv()
     matchups_stats = load_scraped_teams_matchups_stats_from_csv()
 
     team_a_t, team_b_t, _ = create_match_input_tensors(
-        pr_model, players_stats, matchups_stats
+        pr_model, players_stats, matchups_stats, scaler, scaler_h2h
     )
     probs = match_model(team_a_t, team_b_t).squeeze(1).cpu().numpy()
 
@@ -541,7 +549,7 @@ def test(
 
     # advantage slice
     print_tables(
-        "Advantaged-Bets Scoring",
+        "\nAdvantaged-Bets Scoring",
         np.array(adv_y, dtype=int),
         np.array(adv_pm),
         np.array(adv_pb),
@@ -564,6 +572,6 @@ def test(
 
 if __name__ == "__main__":
     set_display_options()
-    pr_model, match_model = train(years=["2022", "2023"])
+    pr_model, match_model, scaler, scaler_h2h = train(years=["2022", "2023"])
     thunderbird_match_odds = load_year_thunderbird_match_odds_from_csv("2024")
-    test(pr_model, match_model, thunderbird_match_odds)
+    test(pr_model, match_model, thunderbird_match_odds, scaler, scaler_h2h)
