@@ -203,7 +203,7 @@ def transform_maps_scores(maps_scores_df: pd.DataFrame) -> pd.DataFrame:
     )
 
     all_matchup_stats = {}
-    for team_a in all_teams[10:]:
+    for team_a in all_teams:
         team_a_as_a = maps_scores_filtered[maps_scores_filtered["Team A"] == team_a]
         team_a_as_b = maps_scores_filtered[maps_scores_filtered["Team B"] == team_a]
 

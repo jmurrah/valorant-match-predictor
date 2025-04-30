@@ -119,10 +119,8 @@ def create_match_input_tensors(
             (matchup_data["Teams"] == "B") & (matchup_data["Opponent"] == "Others")
         ]
 
-        # ---  8-dim player/team features  -------------------------------------
         feat_pr_a = create_team_pr_feature(ta_players, ta_vs_oth)
         feat_pr_b = create_team_pr_feature(tb_players, tb_vs_oth)
-
         with torch.no_grad():
             enc_a = pr_vector(
                 torch.tensor(np.array(feat_pr_a, dtype=np.float32).reshape(1, -1))
@@ -131,18 +129,15 @@ def create_match_input_tensors(
                 torch.tensor(np.array(feat_pr_b, dtype=np.float32).reshape(1, -1))
             )
 
-        emb_a = enc_a.cpu().numpy().ravel()  # (latent_dim,)
+        emb_a = enc_a.cpu().numpy().ravel()
         emb_b = enc_b.cpu().numpy().ravel()
 
-        # ---  2 head-to-head percentage features  -----------------------------
-        pct_a = np.array(create_team_feature(ta_vs_b))  # shape (2,)
+        pct_a = np.array(create_team_feature(ta_vs_b))
         pct_b = np.array(create_team_feature(tb_vs_a))
 
-        # scale with the SAME StandardScaler (mean/std fitted over all seasons)
         pct_a_scaled = scaler_h2h.transform(pct_a.reshape(1, -1)).ravel()
         pct_b_scaled = scaler_h2h.transform(pct_b.reshape(1, -1)).ravel()
 
-        # ---  concat and collect  ---------------------------------------------
         team_a_features.append(np.concatenate([emb_a, pct_a_scaled], axis=0))
         team_b_features.append(np.concatenate([emb_b, pct_b_scaled], axis=0))
         win_probabilities.append(ta_vs_b["Map Win Pct"].values[0])
