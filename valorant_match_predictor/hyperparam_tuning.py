@@ -20,11 +20,10 @@ from valorant_match_predictor.main import (
 )
 from valorant_match_predictor.neural_networks import MatchPredictorNeuralNetwork
 
-# ─────────────────────────────────────────────
-# 1  Build full data tensors
-# ─────────────────────────────────────────────
-YEARS = ["2022", "2023"]
+warnings.simplefilter("ignore", RankWarning)
+BIG_PENALTY = 9_999.0
 
+YEARS = ["2022", "2023"]
 dfs_by_year = read_in_data("data", YEARS)
 transformed = transform_data(dfs_by_year)
 pr_model, scaler_pr, scaler_h2h = get_power_rating_model(transformed)
@@ -41,8 +40,8 @@ for yr in YEARS:
         scaler_h2h,
     )
 
-    y_cont = y_frac.clamp(eps, 1 - eps)  # continuous (0,1)
-    y_bin = (y_frac >= 0.5).float()  # 0 / 1 winner
+    y_cont = y_frac.clamp(eps, 1 - eps)
+    y_bin = (y_frac >= 0.5).float()
 
     mask = ~(
         torch.isnan(ta).any(1) | torch.isnan(tb).any(1) | torch.isnan(y_cont.squeeze())
@@ -54,16 +53,10 @@ for yr in YEARS:
 
 team_a_all = torch.cat(a_all)
 team_b_all = torch.cat(b_all)
-y_cont_all = torch.cat(y_cont_all)  # for training / Brier
-y_bin_all = torch.cat(y_bin_all)  # for log-loss / calibration
+y_cont_all = torch.cat(y_cont_all)
+y_bin_all = torch.cat(y_bin_all)
 
 print(f"Prepared {len(team_a_all)} samples from {YEARS}")
-
-# ─────────────────────────────────────────────
-# 2  Helpers
-# ─────────────────────────────────────────────
-warnings.simplefilter("ignore", RankWarning)
-BIG_PENALTY = 9_999.0
 
 
 def safe_slope(obs: np.ndarray, pred: np.ndarray) -> tuple[float, float]:
@@ -82,9 +75,6 @@ def pprint_trial(tag: str, t: optuna.trial.FrozenTrial) -> None:
     )
 
 
-# ─────────────────────────────────────────────
-# 3  Optuna objective
-# ─────────────────────────────────────────────
 def objective(trial: optuna.trial.Trial) -> tuple[float, float]:
     # hyper-parameters
     h1 = trial.suggest_int("hidden1", 64, 512, step=64)
@@ -142,9 +132,6 @@ def objective(trial: optuna.trial.Trial) -> tuple[float, float]:
     return ll, slope_err
 
 
-# ─────────────────────────────────────────────
-# 4  Run study
-# ─────────────────────────────────────────────
 if __name__ == "__main__":
     study = optuna.create_study(
         directions=["minimize", "minimize"],
