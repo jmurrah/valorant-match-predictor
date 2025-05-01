@@ -16,8 +16,8 @@ class MatchPredictorNeuralNetwork(nn.Module):
     def __init__(
         self,
         input_size: int,
-        hidden_sizes: list[int] = (448, 128),
-        dropout: float = 0.225,
+        hidden_sizes: list[int] = (32, 16),
+        dropout: float = 0.3,
     ) -> None:
         super().__init__()
         self.l1 = nn.Linear(input_size, hidden_sizes[0])
@@ -40,9 +40,9 @@ class MatchPredictorNeuralNetwork(nn.Module):
         labels: torch.Tensor,  # continuous
         *,
         epochs: int = 500,
-        learning_rate: float = 0.035,
+        learning_rate: float = 0.01,
         batch_size: int = 16,
-        patience: int = 20,
+        patience: int = 50,
         weight_decay: float = 2.0e-6,
     ) -> None:
         loader = DataLoader(
@@ -86,7 +86,7 @@ class PowerRatingNeuralNetwork(nn.Module):
         self,
         input_size: int,
         latent_dim: int = 8,
-        hidden_dims: list[int] = [256, 128],
+        hidden_dims: list[int] = [32, 16],
         dropout: float = 0.3,
     ) -> None:
         super().__init__()
@@ -126,10 +126,9 @@ class PowerRatingNeuralNetwork(nn.Module):
         self,
         feature_tensor: torch.Tensor,
         epochs: int = 500,
-        learning_rate: float = 0.001,
+        learning_rate: float = 0.01,
         batch_size: int = 16,
-        print_every: int = 10,
-        patience: int = 20,
+        patience: int = 50,
     ) -> None:
         dataloader = DataLoader(
             TensorDataset(feature_tensor), batch_size=batch_size, shuffle=True
@@ -167,7 +166,7 @@ class PowerRatingNeuralNetwork(nn.Module):
                     )
                     break
 
-            if epoch % print_every == 0:
+            if epoch % 10 == 0:
                 print(f"Epoch {epoch}/{epochs} — Recon Loss: {avg_loss:.4f}")
 
         if best_state is not None:

@@ -11,11 +11,9 @@ from scipy.stats import bootstrap
 
 import warnings
 from numpy.polynomial.polyutils import RankWarning
+import random
 
 from valorant_match_predictor import ScaledPRModel
-import joblib
-
-
 from typing import Callable
 
 from helper import (
@@ -34,7 +32,13 @@ from valorant_match_predictor import (
     print_transformed_data_structure,
 )
 
-
+SEED = 2025
+random.seed(SEED)
+np.random.seed(SEED)
+torch.manual_seed(SEED)
+torch.cuda.manual_seed_all(SEED)
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
 warnings.simplefilter("ignore", RankWarning)
 
 
@@ -101,7 +105,6 @@ def create_match_input_tensors(
             matchup_data = matchups_data[matchups_data["Matchup"] == matchup]
             team_a, team_b = matchup.split("_vs_")
 
-        # ---  gather raw stats  ------------------------------------------------
         ta_players = players_stats[players_stats["Teams"] == team_a]
         tb_players = players_stats[players_stats["Teams"] == team_b]
 
