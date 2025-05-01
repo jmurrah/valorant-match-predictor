@@ -1,87 +1,84 @@
+from __future__ import annotations
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import TensorDataset, DataLoader
+from sklearn.preprocessing import StandardScaler
 
 
 class MatchPredictorNeuralNetwork(nn.Module):
+    """
+    Concatenate (Team-A ‖ Team-B) -> logit.
+    We train on continuous labels with BCEWithLogitsLoss.
+    """
+
     def __init__(
         self,
         input_size: int,
-        hidden_sizes: list[int] = [128, 64],
-        dropout: float = 0.7,
-    ):
+        hidden_sizes: list[int] = (32, 16),
+        dropout: float = 0.3,
+    ) -> None:
         super().__init__()
-        self.layer1 = nn.Linear(input_size, hidden_sizes[0])
-        self.layer2 = nn.Linear(hidden_sizes[0], hidden_sizes[1])
-        self.output = nn.Linear(hidden_sizes[1], 1)
-        self.dropout = nn.Dropout(dropout)
-        self.criterion = nn.BCELoss()
+        self.l1 = nn.Linear(input_size, hidden_sizes[0])
+        self.l2 = nn.Linear(hidden_sizes[0], hidden_sizes[1])
+        self.out = nn.Linear(hidden_sizes[1], 1)
+        self.drop = nn.Dropout(dropout)
 
-    def forward(
-        self, pr_features: torch.Tensor, other_feats: torch.Tensor
-    ) -> torch.Tensor:
-        x = torch.cat([pr_features, other_feats], dim=1)
-        x = F.relu(self.layer1(x))
-        x = self.dropout(x)
-        x = F.relu(self.layer2(x))
-        return torch.sigmoid(self.output(x))
+        self.criterion = nn.BCEWithLogitsLoss()
+
+    def forward(self, a_feats: torch.Tensor, b_feats: torch.Tensor) -> torch.Tensor:
+        x = torch.cat([a_feats, b_feats], dim=1)
+        x = self.drop(F.relu(self.l1(x)))
+        x = self.drop(F.relu(self.l2(x)))
+        return self.out(x)  # raw log-odds (logit)
 
     def train_model(
         self,
-        team_a_features: torch.Tensor,
-        team_b_features: torch.Tensor,
-        win_labels: torch.Tensor,
+        a_feats: torch.Tensor,
+        b_feats: torch.Tensor,
+        labels: torch.Tensor,  # continuous
+        *,
         epochs: int = 500,
-        learning_rate: float = 0.0045,
-        batch_size: int = 32,
-        patience: int = 20,
-    ):
-        ds = TensorDataset(team_a_features, team_b_features, win_labels)
-        dl = DataLoader(ds, batch_size=batch_size, shuffle=True)
-        optimizer = optim.Adam(self.parameters(), lr=learning_rate)
+        learning_rate: float = 0.01,
+        batch_size: int = 16,
+        patience: int = 50,
+        weight_decay: float = 2.0e-6,
+    ) -> None:
+        loader = DataLoader(
+            TensorDataset(a_feats, b_feats, labels), batch_size=batch_size, shuffle=True
+        )
+        opt = optim.AdamW(
+            self.parameters(), lr=learning_rate, weight_decay=weight_decay
+        )
 
-        best_loss = float("inf")
-        epochs_no_improve = 0
-
+        best, no_imp = float("inf"), 0
         self.train()
-        for epoch in range(1, epochs + 1):
-            total_loss = 0.0
-            for prb, ofb, yb in dl:
-                optimizer.zero_grad()
-                preds = self(prb, ofb)
-                loss = self.criterion(preds, yb)
+        for ep in range(1, epochs + 1):
+            run = 0.0
+            for a_b, b_b, y_b in loader:
+                opt.zero_grad()
+                loss = self.criterion(self(a_b, b_b).squeeze(1), y_b.squeeze(1))
                 loss.backward()
-                optimizer.step()
-                total_loss += loss.item()
+                opt.step()
+                run += loss.item()
 
-            avg_loss = total_loss / len(dl)
-
-            if avg_loss < best_loss:
-                best_loss = avg_loss
-                epochs_no_improve = 0
+            avg = run / len(loader)
+            if avg < best:
+                best, no_imp = avg, 0
             else:
-                epochs_no_improve += 1
-                if epochs_no_improve >= patience:
-                    print(
-                        f"Early stopping at epoch {epoch} "
-                        f"(no improvement in {patience} epochs)"
-                    )
+                no_imp += 1
+                if no_imp >= patience:
+                    print(f"Early stopping @ {ep}")
                     break
-
-            if epoch % 10 == 0:
-                print(f"Epoch {epoch}/{epochs}, Loss: {avg_loss:.4f}")
+            if ep % 10 == 0:
+                print(f"Epoch {ep:3d}  loss={avg:.4f}")
 
         self.eval()
 
-    def predict(
-        self, team_a_features: torch.Tensor, team_b_features: torch.Tensor
-    ) -> float:
-        self.eval()
+    def predict_proba(self, a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
         with torch.no_grad():
-            prediction = self(team_a_features, team_b_features)
-            return prediction.item()
+            return torch.sigmoid(self(a, b))
 
 
 class PowerRatingNeuralNetwork(nn.Module):
@@ -129,10 +126,9 @@ class PowerRatingNeuralNetwork(nn.Module):
         self,
         feature_tensor: torch.Tensor,
         epochs: int = 500,
-        learning_rate: float = 0.001,
+        learning_rate: float = 0.01,
         batch_size: int = 16,
-        print_every: int = 10,
-        patience: int = 20,
+        patience: int = 50,
     ) -> None:
         dataloader = DataLoader(
             TensorDataset(feature_tensor), batch_size=batch_size, shuffle=True
@@ -170,7 +166,7 @@ class PowerRatingNeuralNetwork(nn.Module):
                     )
                     break
 
-            if epoch % print_every == 0:
+            if epoch % 10 == 0:
                 print(f"Epoch {epoch}/{epochs} — Recon Loss: {avg_loss:.4f}")
 
         if best_state is not None:
@@ -182,3 +178,26 @@ class PowerRatingNeuralNetwork(nn.Module):
         with torch.no_grad():
             z = self.encode(feature_tensor)
         return z.item()
+
+
+class ScaledPRModel:
+    def __init__(
+        self, models: list[PowerRatingNeuralNetwork], scaler: StandardScaler
+    ) -> None:
+        self.models = models
+        self.scaler = scaler
+        for m in self.models:
+            m.eval()
+
+    def __call__(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        x : (n_samples, n_raw_features) **un-scaled**
+        returns: (ensemble_mean, ...) same shape as each model output
+        """
+        # numpy -> transform -> torch
+        x_scaled = self.scaler.transform(x.numpy())
+        x_scaled = torch.tensor(x_scaled, dtype=torch.float32)
+
+        with torch.no_grad():
+            preds = torch.stack([m.encode(x_scaled) for m in self.models], 0)
+            return preds.mean(0)

@@ -203,7 +203,7 @@ def transform_maps_scores(maps_scores_df: pd.DataFrame) -> pd.DataFrame:
     )
 
     all_matchup_stats = {}
-    for team_a in all_teams[10:]:
+    for team_a in all_teams:
         team_a_as_a = maps_scores_filtered[maps_scores_filtered["Team A"] == team_a]
         team_a_as_b = maps_scores_filtered[maps_scores_filtered["Team B"] == team_a]
 
@@ -233,14 +233,14 @@ def transform_data(
 
     for year in dataframes_by_year:
         print(f"Transforming data for {year}!")
-        transformed_dataframes_by_year[year]["players_stats"]["team_players_stats"] = (
-            transform_players_stats(
-                dataframes_by_year[year]["players_stats"]["players_stats"]
-            )
+        transformed_dataframes_by_year[year]["players_stats"][
+            "team_players_stats"
+        ] = transform_players_stats(
+            dataframes_by_year[year]["players_stats"]["players_stats"]
         )
-        transformed_dataframes_by_year[year]["matches"]["teams_matchups_stats"] = (
-            transform_maps_scores(dataframes_by_year[year]["matches"]["maps_scores"])
-        )
+        transformed_dataframes_by_year[year]["matches"][
+            "teams_matchups_stats"
+        ] = transform_maps_scores(dataframes_by_year[year]["matches"]["maps_scores"])
 
     return transformed_dataframes_by_year
 
