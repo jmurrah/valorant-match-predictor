@@ -8,7 +8,7 @@ import pandas as pd
 
 from scrapers import HEADERS, BASE_URL
 from helper import (
-    load_year_thunderbird_match_odds_from_csv,
+    load_year_thunderpick_match_odds_from_csv,
     set_display_options,
     REGIONAL_TOURNAMENTS,
 )
@@ -408,7 +408,7 @@ if __name__ == "__main__":
     all_matchup_stats = {}
     all_players_stats = []
     for i, match_url in enumerate(
-        list(load_year_thunderbird_match_odds_from_csv("2024").keys())
+        list(load_year_thunderpick_match_odds_from_csv("2024").keys())
     ):
         if "americas" not in match_url:
             continue

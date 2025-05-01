@@ -143,8 +143,8 @@ def save_year_match_odds_to_csv(
 ) -> None:
     """Write one CSV row per match: match_url, team_a, odd_a, team_b, odd_b."""
     out_file = (
-        Path("scraped_data/thunderbird_match_odds")
-        / f"{year}_thunderbird_match_odds.csv"
+        Path("scraped_data/thunderpick_match_odds")
+        / f"{year}_thunderpick_match_odds.csv"
     )
     out_file.parent.mkdir(parents=True, exist_ok=True)
 

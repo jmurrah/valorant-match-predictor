@@ -17,7 +17,7 @@ from valorant_match_predictor import ScaledPRModel
 from typing import Callable
 
 from helper import (
-    load_year_thunderbird_match_odds_from_csv,
+    load_year_thunderpick_match_odds_from_csv,
     set_display_options,
     load_scraped_teams_matchups_stats_from_csv,
     load_scraped_teams_players_stats_from_csv,
@@ -399,12 +399,12 @@ def print_tables(
 
 def compute_payouts_for_match(
     matchup_url: str,
-    thunderbird_odds: dict[str, dict[str, float]],
+    thunderpick_odds: dict[str, dict[str, float]],
     model_odds: dict[str, float],
     winner: str,
     vig: float = 0.0,  # e.g. 0.08 for 8% vig
 ) -> dict[str, dict[str, float]]:
-    raw = thunderbird_odds[matchup_url]
+    raw = thunderpick_odds[matchup_url]
     implied = {team: 1.0 / odds for team, odds in raw.items()}
 
     if vig > 0:
@@ -419,7 +419,7 @@ def compute_payouts_for_match(
     }
 
     return {
-        "Thunderbird": th_payouts,
+        "Thunderpick": th_payouts,
         "Model": model_payouts,
     }
 
@@ -442,7 +442,7 @@ def train(
 def test(
     pr_model,
     match_model,
-    thunderbird_match_odds: dict[str, dict[str, float]],
+    thunderpick_match_odds: dict[str, dict[str, float]],
     scaler,
     scaler_h2h,
     vig: float = 0.08,
@@ -476,7 +476,7 @@ def test(
         yA = 1 if winner == team_a else 0
 
         # book odds
-        raw_odds = thunderbird_match_odds[url]
+        raw_odds = thunderpick_match_odds[url]
         pA_book = 1.0 / raw_odds[team_a]
 
         # juiced odds
@@ -566,5 +566,5 @@ def test(
 if __name__ == "__main__":
     set_display_options()
     pr_model, match_model, scaler, scaler_h2h = train(years=["2022", "2023"])
-    thunderbird_match_odds = load_year_thunderbird_match_odds_from_csv("2024")
-    test(pr_model, match_model, thunderbird_match_odds, scaler, scaler_h2h)
+    thunderpick_match_odds = load_year_thunderpick_match_odds_from_csv("2024")
+    test(pr_model, match_model, thunderpick_match_odds, scaler, scaler_h2h)

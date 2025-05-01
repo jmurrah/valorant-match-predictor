@@ -9,10 +9,10 @@ GLOBAL_TOURNAMENTS = ["Masters", "Valorant Champions"]
 REGIONAL_TOURNAMENTS = ["Americas", "EMEA", "Pacific", "China"]
 
 
-def load_year_thunderbird_match_odds_from_csv(year: str) -> dict[str, dict[str, float]]:
+def load_year_thunderpick_match_odds_from_csv(year: str) -> dict[str, dict[str, float]]:
     in_file = (
-        Path("scraped_data/thunderbird_match_odds")
-        / f"{year}_thunderbird_match_odds.csv"
+        Path("scraped_data/thunderpick_match_odds")
+        / f"{year}_thunderpick_match_odds.csv"
     )
 
     match_odds = defaultdict(dict)
