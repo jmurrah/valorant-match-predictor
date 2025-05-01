@@ -16,7 +16,7 @@ class MatchPredictorNeuralNetwork(nn.Module):
     def __init__(
         self,
         input_size: int,
-        hidden_sizes: list[int] = (32, 16),
+        hidden_sizes: list[int] = (384, 192),
         dropout: float = 0.3,
     ) -> None:
         super().__init__()
@@ -40,10 +40,10 @@ class MatchPredictorNeuralNetwork(nn.Module):
         labels: torch.Tensor,  # continuous
         *,
         epochs: int = 500,
-        learning_rate: float = 0.01,
+        learning_rate: float = 0.0004,
         batch_size: int = 16,
         patience: int = 50,
-        weight_decay: float = 2.0e-6,
+        weight_decay: float = 0.00016,
     ) -> None:
         loader = DataLoader(
             TensorDataset(a_feats, b_feats, labels), batch_size=batch_size, shuffle=True

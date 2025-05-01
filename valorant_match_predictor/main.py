@@ -529,7 +529,7 @@ def test(
     edge = 100 * (bankroll_raw - bankroll_vig) / bets if bets else 0
 
     print("\n--- ADVANTAGED BETS Backtest ---")
-    print(f"Bets placed:                      {bets}")
+    print(f"Bets placed:                      {bets}/{len(urls)}")
     print(f"Average model EV:                 {avg_ev:+.3f}")
     print(
         f"Site pays RAW odds (vig 0%):      ${bankroll_raw:+.2f} | ROI {roi_raw:+.1f}%"
