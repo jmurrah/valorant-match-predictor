@@ -253,22 +253,16 @@ def create_final_pr_model(
     return final_predication
 
 
-def create_final_match_model(
-    models: list[MatchPredictorNeuralNetwork],
-) -> Callable[[torch.Tensor, torch.Tensor], torch.Tensor]:
-    def final_prediction(
-        team_a_features: torch.Tensor, team_b_features: torch.Tensor
-    ) -> torch.Tensor:
-        for model in models:
-            model.eval()
-
+def create_final_match_model(models):
+    def final(a, b):
+        for m in models:
+            m.eval()
         with torch.no_grad():
-            probs = torch.stack(
-                [model(team_a_features, team_b_features) for model in models], dim=0
-            )
-            return torch.mean(probs, dim=0)
+            logits = torch.stack([m(a, b) for m in models], 0)  # (n_models, N, 1)
+            probs = torch.sigmoid(logits)
+            return probs.mean(0)
 
-    return final_prediction
+    return final
 
 
 def get_match_predictor_model(
@@ -293,11 +287,13 @@ def get_match_predictor_model(
         team_b_tensor = team_b_tensor[combined_mask]
         win_probabilities = win_probabilities[combined_mask]
 
-        input_size = len(team_a_tensor[0]) + len(team_b_tensor[0])
-        match_predictor_nn = MatchPredictorNeuralNetwork(input_size=input_size)
-        match_predictor_nn.train_model(team_a_tensor, team_b_tensor, win_probabilities)
+        eps = 1e-3
+        y_target = win_probabilities.clamp(eps, 1 - eps)
+        input_size = team_a_tensor.shape[1] + team_b_tensor.shape[1]
+        net = MatchPredictorNeuralNetwork(input_size=input_size)
+        net.train_model(team_a_tensor, team_b_tensor, y_target)
 
-        yearly_match_models.append(match_predictor_nn)
+        yearly_match_models.append(net)
 
     final_match_model = create_final_match_model(yearly_match_models)
     return final_match_model

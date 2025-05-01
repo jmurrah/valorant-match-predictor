@@ -8,82 +8,77 @@ from sklearn.preprocessing import StandardScaler
 
 
 class MatchPredictorNeuralNetwork(nn.Module):
+    """
+    Concatenate (Team-A ‖ Team-B) -> logit.
+    We train on continuous labels with BCEWithLogitsLoss.
+    """
+
     def __init__(
         self,
         input_size: int,
-        hidden_sizes: list[int] = [512, 432],
-        dropout: float = 0.066,
-    ):
+        hidden_sizes: list[int] = (448, 128),
+        dropout: float = 0.225,
+    ) -> None:
         super().__init__()
-        self.layer1 = nn.Linear(input_size, hidden_sizes[0])
-        self.layer2 = nn.Linear(hidden_sizes[0], hidden_sizes[1])
-        self.output = nn.Linear(hidden_sizes[1], 1)
-        self.dropout = nn.Dropout(dropout)
-        self.criterion = nn.BCELoss()
+        self.l1 = nn.Linear(input_size, hidden_sizes[0])
+        self.l2 = nn.Linear(hidden_sizes[0], hidden_sizes[1])
+        self.out = nn.Linear(hidden_sizes[1], 1)
+        self.drop = nn.Dropout(dropout)
 
-    def forward(
-        self, pr_features: torch.Tensor, other_feats: torch.Tensor
-    ) -> torch.Tensor:
-        x = torch.cat([pr_features, other_feats], dim=1)
-        x = F.relu(self.layer1(x))
-        x = self.dropout(x)
-        x = F.relu(self.layer2(x))
-        return torch.sigmoid(self.output(x))
+        self.criterion = nn.BCEWithLogitsLoss()
+
+    def forward(self, a_feats: torch.Tensor, b_feats: torch.Tensor) -> torch.Tensor:
+        x = torch.cat([a_feats, b_feats], dim=1)
+        x = self.drop(F.relu(self.l1(x)))
+        x = self.drop(F.relu(self.l2(x)))
+        return self.out(x)  # raw log-odds (logit)
 
     def train_model(
         self,
-        team_a_features: torch.Tensor,
-        team_b_features: torch.Tensor,
-        win_labels: torch.Tensor,
+        a_feats: torch.Tensor,
+        b_feats: torch.Tensor,
+        labels: torch.Tensor,  # continuous
+        *,
         epochs: int = 500,
-        learning_rate: float = 0.0019,
+        learning_rate: float = 0.035,
         batch_size: int = 16,
         patience: int = 20,
-    ):
-        ds = TensorDataset(team_a_features, team_b_features, win_labels)
-        dl = DataLoader(ds, batch_size=batch_size, shuffle=True)
-        optimizer = optim.Adam(self.parameters(), lr=learning_rate)
+        weight_decay: float = 2.0e-6,
+    ) -> None:
+        loader = DataLoader(
+            TensorDataset(a_feats, b_feats, labels), batch_size=batch_size, shuffle=True
+        )
+        opt = optim.AdamW(
+            self.parameters(), lr=learning_rate, weight_decay=weight_decay
+        )
 
-        best_loss = float("inf")
-        epochs_no_improve = 0
-
+        best, no_imp = float("inf"), 0
         self.train()
-        for epoch in range(1, epochs + 1):
-            total_loss = 0.0
-            for prb, ofb, yb in dl:
-                optimizer.zero_grad()
-                preds = self(prb, ofb)
-                loss = self.criterion(preds, yb)
+        for ep in range(1, epochs + 1):
+            run = 0.0
+            for a_b, b_b, y_b in loader:
+                opt.zero_grad()
+                loss = self.criterion(self(a_b, b_b).squeeze(1), y_b.squeeze(1))
                 loss.backward()
-                optimizer.step()
-                total_loss += loss.item()
+                opt.step()
+                run += loss.item()
 
-            avg_loss = total_loss / len(dl)
-
-            if avg_loss < best_loss:
-                best_loss = avg_loss
-                epochs_no_improve = 0
+            avg = run / len(loader)
+            if avg < best:
+                best, no_imp = avg, 0
             else:
-                epochs_no_improve += 1
-                if epochs_no_improve >= patience:
-                    print(
-                        f"Early stopping at epoch {epoch} "
-                        f"(no improvement in {patience} epochs)"
-                    )
+                no_imp += 1
+                if no_imp >= patience:
+                    print(f"Early stopping @ {ep}")
                     break
-
-            if epoch % 10 == 0:
-                print(f"Epoch {epoch}/{epochs}, Loss: {avg_loss:.4f}")
+            if ep % 10 == 0:
+                print(f"Epoch {ep:3d}  loss={avg:.4f}")
 
         self.eval()
 
-    def predict(
-        self, team_a_features: torch.Tensor, team_b_features: torch.Tensor
-    ) -> float:
-        self.eval()
+    def predict_proba(self, a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
         with torch.no_grad():
-            prediction = self(team_a_features, team_b_features)
-            return prediction.item()
+            return torch.sigmoid(self(a, b))
 
 
 class PowerRatingNeuralNetwork(nn.Module):
